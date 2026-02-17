@@ -43,9 +43,8 @@ This enhancement allows operators to instantly identify senders serving mixed wo
 **Backend:**
 - .NET 9.0 (C#)
 - ASP.NET Core Web API
-- NDI Advanced SDK 6.3
+- NDI SDK 6
 - WebSockets support
-- Windows Service integration
 
 **Frontend:**
 - React 19.2
@@ -123,7 +122,7 @@ NDI Sender "Camera 1"
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    NDI Discovery Server                      │
-│              (NDI Advanced SDK 6.3)                         │
+│              (NDI SDK 6)                                    │
 └─────────────────┬───────────────────────────┬───────────────┘
                   │                           │
                   │ Events API                │ Events API

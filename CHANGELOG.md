@@ -65,7 +65,7 @@ This is useful for:
 - Visual flow editor using React Flow
 - Drag-and-drop connection management
 - WebSocket support for real-time updates
-- Event monitoring from NDI Advanced SDK 6.3
+- Event monitoring from NDI SDK 6
 - Persistent node layout (localStorage)
 - Windows Service integration with automatic startup
 - Self-contained installer using Inno Setup
@@ -74,7 +74,7 @@ This is useful for:
 
 **Backend (.NET 9.0):**
 - ASP.NET Core Web API (port 5000)
-- NDI SDK wrapper with vendor credentials
+- NDI SDK wrapper via P/Invoke
 - Background service for continuous monitoring
 - REST API endpoints for device control
 - Event caching system

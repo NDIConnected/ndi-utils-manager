@@ -1,4 +1,4 @@
-# NDI 6.3 Event System Implementation Guide
+# NDI 6 Event System Implementation Guide
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -14,18 +14,21 @@
 ## Introduction
 
 ### The Problem
-When working with the NDI 6.3 Advanced SDK and Discovery Server, receivers can be connected to sources but the Discovery Server API doesn't directly provide the connected source name. The `p_input_name` field of the `NDIlib_receiver_t` structure is always empty.
+When working with the NDI SDK and Discovery Server, receivers can be connected to sources but the Discovery Server API doesn't directly provide the connected source name. The `p_input_name` field of the `NDIlib_receiver_t` structure is always empty.
 
 ### The Solution
-NDI 6.3 introduces an **event system** that allows monitoring receiver state in real-time. Through these events, we can obtain:
+NDI 6 introduces an **event system** that allows monitoring receiver state in real-time. Through these events, we can obtain:
 - Connected source name (`source-name`)
 - Connection state (`connection-state`)
 - Audio/video codecs in use
 - Resolution and frame rate
 - And many other details
 
-### Key Component: `NDIlib_recv_listener_create_ex`
-The key to enabling events is using **`NDIlib_recv_listener_create_ex`** instead of `NDIlib_recv_listener_create`. The `_ex` function accepts a JSON parameter with vendor credentials that **enables event monitoring**.
+### Key APIs
+- `NDIlib_recv_listener_create` — creates a listener for receiver monitoring
+- `NDIlib_recv_listener_subscribe_events` — subscribes to events for a specific receiver
+- `NDIlib_recv_listener_get_events` — polls pending events
+- `NDIlib_recv_listener_free_events` — frees event memory
 
 ---
 
@@ -34,7 +37,7 @@ The key to enabling events is using **`NDIlib_recv_listener_create_ex`** instead
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    NDI Discovery Server                      │
-│                   (192.168.15.60:5959)                       │
+│                   (NDI SDK 6)                                │
 └────────────────┬────────────────────────────┬────────────────┘
                  │                            │
                  │ Register                   │ Register
@@ -59,7 +62,7 @@ The key to enabling events is using **`NDIlib_recv_listener_create_ex`** instead
     │  └───────────────────────────────────────────────┘  │
     │                                                       │
     │  ┌───────────────────────────────────────────────┐  │
-    │  │   NDIRecvListener (with vendor credentials)   │  │
+    │  │   NDIRecvListener                             │  │
     │  │   - Monitors registered receivers             │  │
     │  │   - Subscribes to receiver events             │  │
     │  │   - Receives source-name, connection-state... │  │
@@ -84,46 +87,23 @@ The key to enabling events is using **`NDIlib_recv_listener_create_ex`** instead
 
 ## Prerequisites
 
-1. **NDI 6.3 Advanced SDK** installed
-2. **Vendor Credentials** with `NTK_NDI_SDK_CB_MON_CTRL` permission
-3. **Discovery Server** active on the network
-4. **.NET 8.0 SDK** or higher
-5. DLL file: `Processing.NDI.Lib.Advanced.x64.dll`
-
-### Generating Vendor Credentials
-
-The vendor credentials must have the `NTK_NDI_SDK_CB_MON_CTRL` permission which enables:
-- Monitoring events from receivers
-- Sending control commands to receivers
-- Changing video receive bandwidth
-
-```bash
-# Example credential generation
-KeyGenerator.exe NTK_NDI_SDK_CB_MON_CTRL NDIROBERTODEMO
-
-# Output:
-# VENDOR NAME: NDIROBERTODEMO
-# VENDOR CODE: WftHFpsVv29j+26DZmdAaNabpwN5VRT2lJnPPe9mtgs=
-```
+1. **NDI 6 SDK** installed
+2. **Discovery Server** active on the network
+3. **.NET 9.0 SDK** or higher
+4. DLL file: `Processing.NDI.Lib.x64.dll`
 
 ---
 
 ## Step-by-Step Implementation
 
-### Step 1: Add `_create_ex` Function to NDI Wrapper
+### Step 1: Add RecvListener Functions to NDI Wrapper
 
 **File:** `NDIWrapper.cs`
 
 ```csharp
-// RecvListener API - NDI 6.3
+// RecvListener API - NDI 6
 [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
 public static extern IntPtr NDIlib_recv_listener_create(ref recv_listener_create_t p_create_settings);
-
-// IMPORTANT: This function is required to enable events
-[DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-public static extern IntPtr NDIlib_recv_listener_create_ex(
-    ref recv_listener_create_t p_create_settings,
-    string? p_config_data);
 
 [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
 public static extern void NDIlib_recv_listener_destroy(IntPtr p_instance);
@@ -181,13 +161,13 @@ public class NDIReceiverEvent
 }
 ```
 
-### Step 4: Modify RecvListener Initialization
+### Step 4: Initialize the RecvListener
 
 **File:** `NDIRecvListener.cs`
 
 ```csharp
 /// <summary>
-/// Initialize the RecvListener with vendor credentials for event monitoring
+/// Initialize the RecvListener
 /// </summary>
 public bool Initialize(string? discoveryServerUrl = null)
 {
@@ -196,16 +176,7 @@ public bool Initialize(string? discoveryServerUrl = null)
         p_url_address = IntPtr.Zero
     };
 
-    // CRITICAL: Must use create_ex with vendor credentials to enable event monitoring
-    // See: NDI Advanced SDK examples/C++/NDIlib_Recv_Listener_Advanced
-    const string VENDOR_NAME = "NDIROBERTODEMO";
-    const string VENDOR_CODE = "WftHFpsVv29j+26DZmdAaNabpwN5VRT2lJnPPe9mtgs=";
-
-    // Create JSON config with vendor credentials
-    string configJson = $@"{{ ""ndi"": {{ ""vendor"": {{ ""name"": ""{VENDOR_NAME}"", ""id"": ""{VENDOR_CODE}"" }}}}}}";
-
-    // Use _create_ex instead of _create
-    _listenerInstance = NDI.NDIlib_recv_listener_create_ex(ref listenerSettings, configJson);
+    _listenerInstance = NDI.NDIlib_recv_listener_create(ref listenerSettings);
 
     if (_listenerInstance == IntPtr.Zero)
     {
@@ -257,11 +228,9 @@ public List<NDIReceiverInfo> GetReceivers()
         receiverList.Add(receiverInfo);
 
         // AUTOMATIC EVENT SUBSCRIPTION
-        // Subscribe to events if not already subscribed
         if (!receiver.events_subscribed && !string.IsNullOrEmpty(uuid))
         {
             SubscribeEvents(uuid);
-            Console.WriteLine($"[NDIRecvListener] Subscribed to events for receiver: {name}");
         }
     }
 
@@ -336,42 +305,27 @@ public class NDIDiscoveryService : BackgroundService
     // CACHE: Persistent cache of receiver UUID -> source name from events
     private readonly ConcurrentDictionary<string, string> _receiverSourceNames;
 
-    public NDIDiscoveryService(ILogger<NDIDiscoveryService> logger)
-    {
-        _logger = logger;
-        _receivers = new ConcurrentDictionary<string, NDIReceiverInfo>();
-        _receiverSourceNames = new ConcurrentDictionary<string, string>();
-        _recvListener = new NDIRecvListener();
-
-        // Initialize NDI and RecvListener...
-    }
-
     private void DiscoverDevices(object? state)
     {
         try
         {
-            // Get receivers from NDI Discovery Server
             var receivers = _recvListener.GetReceivers();
 
             // Poll for events and update persistent cache
             var events = _recvListener.GetEvents(0);  // 0 = non-blocking
             foreach (var evt in events)
             {
-                Console.WriteLine($"[Event] UUID: {evt.ReceiverUuid}, Name: {evt.EventName}, Value: {evt.EventValue}");
-
-                // Extract source-name events and save to persistent cache
                 if (evt.EventName == "source-name")
                 {
                     if (!string.IsNullOrEmpty(evt.EventValue))
                     {
-                        // Connected to a source
                         _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue;
                     }
-                    else
-                    {
-                        // Disconnected (empty source-name)
-                        _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
-                    }
+                }
+
+                if (evt.EventName == "connection-state" && evt.EventValue == "disconnected")
+                {
+                    _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
                 }
             }
 
@@ -379,7 +333,6 @@ public class NDIDiscoveryService : BackgroundService
             _receivers.Clear();
             foreach (var receiver in receivers)
             {
-                // Use cached source name from events
                 if (_receiverSourceNames.TryGetValue(receiver.Id, out var sourceName))
                 {
                     receiver.CurrentSource = sourceName;
@@ -397,40 +350,20 @@ public class NDIDiscoveryService : BackgroundService
 }
 ```
 
-### Step 8: Configure Discovery Timer
-
-**File:** `NDIDiscoveryService.cs`
-
-```csharp
-public NDIDiscoveryService(ILogger<NDIDiscoveryService> logger)
-{
-    _logger = logger;
-    _receivers = new ConcurrentDictionary<string, NDIReceiverInfo>();
-    _receiverSourceNames = new ConcurrentDictionary<string, string>();
-    _recvListener = new NDIRecvListener();
-
-    // Initialize NDI SDK...
-
-    // Timer for periodic discovery (every 2 seconds)
-    // Events are cached, so we don't need to poll too frequently
-    _discoveryTimer = new Timer(DiscoverDevices, null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
-}
-```
-
 ---
 
 ## Testing
 
 ### Test 1: Verify Event Reception
 
-Start the application and check the logs to verify events are being received:
+Start the application and check that events are being received:
 
 ```
 [NDIRecvListener] Subscribed to events for receiver: MEDIANEWS-ZBOOK (NDI Studio Monitor 1)
-[NDIRecvListener Event] UUID: 0386dbe3-dabb-4ad6-a4e9-1ff55f85cee9, Name: source-name, Value: MEDIANEWS-ZBOOK (SENDER 001)
-[NDIRecvListener Event] UUID: 0386dbe3-dabb-4ad6-a4e9-1ff55f85cee9, Name: connection-state, Value: connected
-[NDIRecvListener Event] UUID: 0386dbe3-dabb-4ad6-a4e9-1ff55f85cee9, Name: video-resolution, Value: 1920x1080
-[NDIRecvListener Event] UUID: 0386dbe3-dabb-4ad6-a4e9-1ff55f85cee9, Name: video-codec, Value: shq7
+[Event] UUID: 0386dbe3-..., Name: source-name, Value: MEDIANEWS-ZBOOK (SENDER 001)
+[Event] UUID: 0386dbe3-..., Name: connection-state, Value: connected
+[Event] UUID: 0386dbe3-..., Name: video-resolution, Value: 1920x1080
+[Event] UUID: 0386dbe3-..., Name: video-codec, Value: shq7
 ```
 
 ### Test 2: Verify REST API
@@ -445,7 +378,7 @@ curl http://localhost:5000/api/ndi/receivers
     "id": "0386dbe3-dabb-4ad6-a4e9-1ff55f85cee9",
     "name": "MEDIANEWS-ZBOOK (NDI Studio Monitor 1)",
     "inputUuid": "236514f6-104b-4efc-a1f1-ba919f789712",
-    "currentSource": "MEDIANEWS-ZBOOK (SENDER 001)",  // ✅ Correctly populated
+    "currentSource": "MEDIANEWS-ZBOOK (SENDER 001)",
     "isConnected": true,
     "status": "Connected"
   }
@@ -455,7 +388,7 @@ curl http://localhost:5000/api/ndi/receivers
 ### Test 3: Test Disconnection/Reconnection
 
 1. Disconnect a monitor from Studio Monitor
-2. Verify you receive a `source-name` event with empty value
+2. Verify you receive a `connection-state: disconnected` event
 3. Verify `currentSource` becomes `null` in the API
 4. Reconnect the monitor
 5. Verify you receive a `source-name` event with the new name
@@ -467,29 +400,23 @@ curl http://localhost:5000/api/ndi/receivers
 
 ### Problem: No Events Received
 
-**Symptom:**
-```
-Events Subscribed: True
-# But no [NDIRecvListener Event] messages appear in logs
-```
+**Symptom:** `events_subscribed` is `True` but no events appear.
 
-**Probable Cause:**
-You're using `NDIlib_recv_listener_create` instead of `NDIlib_recv_listener_create_ex`.
+**Possible causes:**
+- The listener was not created successfully (check return value)
+- The Discovery Server is not reachable
+- No state changes have occurred (events are edge-triggered)
 
 **Solution:**
-Verify that `NDIRecvListener.Initialize()` uses `NDIlib_recv_listener_create_ex` with JSON config:
-
-```csharp
-_listenerInstance = NDI.NDIlib_recv_listener_create_ex(ref listenerSettings, configJson);
-```
+1. Verify `NDIlib_recv_listener_create` returns a valid pointer
+2. Check Discovery Server connectivity with `NDIlib_recv_listener_is_connected`
+3. Trigger a state change (connect/disconnect a receiver) to generate events
 
 ### Problem: Events Received Only on First Poll
 
-**Symptom:**
-Events received only at startup, then nothing.
+**Symptom:** Events received only at startup, then nothing.
 
-**Cause:**
-Events are **edge-triggered**: they're only sent when a value changes.
+**Cause:** Events are **edge-triggered**: they're only sent when a value changes.
 
 **Solution:**
 Implement a persistent cache (`ConcurrentDictionary`) to store event values:
@@ -498,29 +425,11 @@ Implement a persistent cache (`ConcurrentDictionary`) to store event values:
 private readonly ConcurrentDictionary<string, string> _receiverSourceNames;
 ```
 
-### Problem: Invalid Vendor Credentials
-
-**Symptom:**
-```
-Events Subscribed: False
-# or
-NDIlib_recv_listener_create_ex returns IntPtr.Zero
-```
-
-**Solution:**
-1. Verify credentials have the `NTK_NDI_SDK_CB_MON_CTRL` permission
-2. Check JSON format is correct:
-```json
-{ "ndi": { "vendor": { "name": "VENDOR_NAME", "id": "VENDOR_CODE" }}}
-```
-
 ### Problem: Memory Leak
 
-**Symptom:**
-Memory usage grows over time.
+**Symptom:** Memory usage grows over time.
 
-**Cause:**
-Not calling `NDIlib_recv_listener_free_events` after processing events.
+**Cause:** Not calling `NDIlib_recv_listener_free_events` after processing events.
 
 **Solution:**
 Always use a `try-finally` block:
@@ -639,17 +548,17 @@ Here's a list of the most common events you can receive:
 
 ## References
 
-- **NDI Advanced SDK Documentation** - RecvListener API section
-- **NDI Advanced SDK Examples** - `Examples/C++/NDIlib_Recv_Listener_Advanced`
-- **NDI 6.3 Discovery Server Protocol** - Official NewTek documentation
+- **NDI SDK 6 Documentation** — RecvListener and SendListener API sections
+- **NDI SDK 6 C# Examples** — `Examples/C#/Managed NDI Recv Listener`
+- **NDI Discovery Server Protocol** — Official Vizrt NDI documentation
 
 ---
 
 ## Conclusion
 
-The NDI 6.3 event system provides a powerful and efficient way to monitor receiver state in real-time. The key is:
+The NDI 6 event system provides a powerful and efficient way to monitor receiver state in real-time. The key steps are:
 
-1. **Use `NDIlib_recv_listener_create_ex`** with vendor credentials
+1. **Create listeners** with `NDIlib_recv_listener_create`
 2. **Automatically subscribe** to events for each receiver
 3. **Implement a cache** for edge-triggered events
 4. **Poll regularly** for events (1-2 seconds)
@@ -659,6 +568,6 @@ With this implementation, you'll have a complete NDI monitoring system that show
 
 ---
 
-**Version:** 1.0
-**Date:** November 14, 2025
+**Version:** 2.0
+**Date:** February 2026
 **Author:** NDI Manager Development Team
