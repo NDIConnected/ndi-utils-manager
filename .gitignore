@@ -1,0 +1,36 @@
+# .NET build output
+bin/
+obj/
+publish/
+
+# IDE
+.vs/
+*.user
+*.suo
+*.cache
+*.DotSettings.user
+
+# Installer output
+Output/
+
+# NDI SDK (reference only, not part of the project)
+NDI 6 SDK/
+
+# Frontend dependencies (install with npm install)
+ndi-web-ui/node_modules/
+ndi-web-ui/dist/
+
+# Frontend built files served by backend (rebuild with npm run build)
+wwwroot/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Cursor/Claude
+.claude/
+
+# Logs
+*.log
+Logs/

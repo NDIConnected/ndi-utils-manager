@@ -1,0 +1,365 @@
+using System.Diagnostics;
+using System.Drawing.Drawing2D;
+using System.Text.Json;
+using NDIManager.Services;
+
+namespace NDIManager;
+
+public class TrayApplicationContext : ApplicationContext
+{
+    private readonly NotifyIcon _trayIcon;
+    private readonly string[] _args;
+    private readonly string _settingsPath;
+
+    private WebApplication? _webApp;
+    private CancellationTokenSource? _cts;
+    private int _currentPort;
+    private bool _serverRunning;
+
+    private ToolStripMenuItem? _portMenuItem;
+    private ToolStripMenuItem? _statusMenuItem;
+
+    public TrayApplicationContext(string[] args)
+    {
+        _args = args;
+        _settingsPath = InitSettingsPath();
+        _currentPort = LoadPort();
+
+        _trayIcon = new NotifyIcon
+        {
+            Icon = CreateTrayIcon(),
+            Text = $"NDI Manager - Port {_currentPort}",
+            Visible = true,
+            ContextMenuStrip = BuildContextMenu()
+        };
+
+        _trayIcon.DoubleClick += (_, _) => OpenWebUI();
+
+        _ = StartWebServerAsync();
+    }
+
+    private ContextMenuStrip BuildContextMenu()
+    {
+        var menu = new ContextMenuStrip();
+        menu.Renderer = new ToolStripProfessionalRenderer(new DarkColorTable());
+
+        // Open Web UI (bold = default action)
+        var openItem = new ToolStripMenuItem("Open Web UI");
+        openItem.Font = new Font(openItem.Font, FontStyle.Bold);
+        openItem.Click += (_, _) => OpenWebUI();
+        menu.Items.Add(openItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        // Status
+        _statusMenuItem = new ToolStripMenuItem("Status: Starting...")
+        {
+            Enabled = false
+        };
+        menu.Items.Add(_statusMenuItem);
+
+        // Port
+        _portMenuItem = new ToolStripMenuItem($"Port: {_currentPort}");
+        _portMenuItem.Click += (_, _) => ChangePort();
+        menu.Items.Add(_portMenuItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
+        // Exit
+        var exitItem = new ToolStripMenuItem("Exit");
+        exitItem.Click += (_, _) => ExitApplication();
+        menu.Items.Add(exitItem);
+
+        return menu;
+    }
+
+    #region Web Server
+
+    private async Task StartWebServerAsync()
+    {
+        try
+        {
+            _cts = new CancellationTokenSource();
+
+            var builder = WebApplication.CreateBuilder(_args);
+
+            // Services
+            builder.Services.AddControllers();
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen();
+
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowReactSPA", policy =>
+                {
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader();
+                });
+            });
+
+            builder.Services.AddSingleton<NDIDiscoveryService>();
+            builder.Services.AddHostedService<NDIDiscoveryService>(
+                sp => sp.GetRequiredService<NDIDiscoveryService>());
+
+            builder.WebHost.UseUrls($"http://localhost:{_currentPort}", $"http://*:{_currentPort}");
+
+            // In WinExe mode, console logging goes nowhere - keep default providers
+            // for Debug output window; add file logging if needed later
+            builder.Logging.SetMinimumLevel(LogLevel.Warning);
+
+            _webApp = builder.Build();
+
+            // Middleware pipeline
+            _webApp.UseSwagger();
+            _webApp.UseSwaggerUI();
+            _webApp.UseCors("AllowReactSPA");
+            _webApp.UseDefaultFiles();
+            _webApp.UseStaticFiles();
+            _webApp.UseWebSockets();
+            _webApp.UseAuthorization();
+            _webApp.MapControllers();
+            _webApp.MapFallbackToFile("index.html");
+
+            UpdateStatus(true);
+
+            _trayIcon.ShowBalloonTip(
+                2000,
+                "NDI Manager",
+                $"Running on http://localhost:{_currentPort}",
+                ToolTipIcon.Info);
+
+            await _webApp.RunAsync(_cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown/restart
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus(false);
+            _trayIcon.ShowBalloonTip(
+                5000,
+                "NDI Manager - Error",
+                $"Failed to start on port {_currentPort}: {ex.Message}",
+                ToolTipIcon.Error);
+        }
+    }
+
+    private async Task StopWebServerAsync()
+    {
+        if (_cts != null)
+        {
+            await _cts.CancelAsync();
+            _cts.Dispose();
+            _cts = null;
+        }
+
+        if (_webApp != null)
+        {
+            try
+            {
+                await _webApp.DisposeAsync();
+            }
+            catch { }
+            _webApp = null;
+        }
+
+        _serverRunning = false;
+    }
+
+    private async Task RestartWebServerAsync()
+    {
+        UpdateStatus(false);
+
+        _trayIcon.ShowBalloonTip(
+            2000,
+            "NDI Manager",
+            $"Restarting on port {_currentPort}...",
+            ToolTipIcon.Info);
+
+        await StopWebServerAsync();
+        await Task.Delay(500);
+
+        _ = StartWebServerAsync();
+    }
+
+    private void UpdateStatus(bool running)
+    {
+        _serverRunning = running;
+
+        if (_statusMenuItem != null)
+        {
+            _statusMenuItem.Text = running
+                ? $"Status: Running"
+                : "Status: Stopped";
+        }
+
+        _trayIcon.Text = running
+            ? $"NDI Manager - http://localhost:{_currentPort}"
+            : "NDI Manager - Stopped";
+    }
+
+    #endregion
+
+    #region Menu Actions
+
+    private void OpenWebUI()
+    {
+        if (!_serverRunning)
+        {
+            _trayIcon.ShowBalloonTip(
+                2000,
+                "NDI Manager",
+                "The server is not running.",
+                ToolTipIcon.Warning);
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = $"http://localhost:{_currentPort}",
+            UseShellExecute = true
+        });
+    }
+
+    private void ChangePort()
+    {
+        using var dialog = new PortChangeDialog(_currentPort);
+
+        if (dialog.ShowDialog() == DialogResult.OK && dialog.SelectedPort != _currentPort)
+        {
+            _currentPort = dialog.SelectedPort;
+            SavePort(_currentPort);
+
+            if (_portMenuItem != null)
+                _portMenuItem.Text = $"Port: {_currentPort}";
+
+            _ = RestartWebServerAsync();
+        }
+    }
+
+    private async void ExitApplication()
+    {
+        _trayIcon.Visible = false;
+        await StopWebServerAsync();
+        Application.Exit();
+    }
+
+    #endregion
+
+    #region Settings
+
+    private static string InitSettingsPath()
+    {
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "NDIManager");
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, "settings.json");
+    }
+
+    private int LoadPort()
+    {
+        try
+        {
+            if (File.Exists(_settingsPath))
+            {
+                var json = File.ReadAllText(_settingsPath);
+                var settings = JsonSerializer.Deserialize<ManagerSettings>(json);
+                if (settings?.Port is > 0 and <= 65535)
+                    return settings.Port;
+            }
+        }
+        catch { }
+
+        return 5000;
+    }
+
+    private void SavePort(int port)
+    {
+        try
+        {
+            var settings = new ManagerSettings { Port = port };
+            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(_settingsPath, json);
+        }
+        catch { }
+    }
+
+    #endregion
+
+    #region Icon
+
+    private static Icon CreateTrayIcon()
+    {
+        var bmp = new Bitmap(32, 32);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+            // Blue circle background
+            using var bgBrush = new SolidBrush(Color.FromArgb(0, 120, 215));
+            g.FillEllipse(bgBrush, 1, 1, 30, 30);
+
+            // White "N" letter
+            using var font = new Font("Segoe UI", 15, FontStyle.Bold);
+            using var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            g.DrawString("N", font, Brushes.White, new RectangleF(0, -1, 32, 32), sf);
+        }
+
+        var hIcon = bmp.GetHicon();
+        var icon = (Icon)Icon.FromHandle(hIcon).Clone();
+        DestroyIcon(hIcon);
+        return icon;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr handle);
+
+    #endregion
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _cts?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+}
+
+/// <summary>
+/// Application settings persisted to disk
+/// </summary>
+public class ManagerSettings
+{
+    public int Port { get; set; } = 5000;
+}
+
+/// <summary>
+/// Dark-themed color table for the context menu
+/// </summary>
+internal class DarkColorTable : ProfessionalColorTable
+{
+    public override Color MenuBorder => Color.FromArgb(60, 60, 60);
+    public override Color MenuItemSelected => Color.FromArgb(55, 55, 55);
+    public override Color MenuItemSelectedGradientBegin => Color.FromArgb(55, 55, 55);
+    public override Color MenuItemSelectedGradientEnd => Color.FromArgb(55, 55, 55);
+    public override Color MenuStripGradientBegin => Color.FromArgb(35, 35, 35);
+    public override Color MenuStripGradientEnd => Color.FromArgb(35, 35, 35);
+    public override Color MenuItemBorder => Color.FromArgb(80, 80, 80);
+    public override Color ToolStripDropDownBackground => Color.FromArgb(40, 40, 40);
+    public override Color ImageMarginGradientBegin => Color.FromArgb(40, 40, 40);
+    public override Color ImageMarginGradientMiddle => Color.FromArgb(40, 40, 40);
+    public override Color ImageMarginGradientEnd => Color.FromArgb(40, 40, 40);
+    public override Color SeparatorDark => Color.FromArgb(60, 60, 60);
+    public override Color SeparatorLight => Color.FromArgb(60, 60, 60);
+}
