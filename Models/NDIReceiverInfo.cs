@@ -5,9 +5,18 @@ public class NDIReceiverInfo
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = string.Empty;
     public string HostName { get; set; } = Environment.MachineName;
-    public string? InputUuid { get; set; }  // UUID of the connected sender
+    public string Address { get; set; } = string.Empty;
+    public string? InputUuid { get; set; }
     public string? CurrentSource { get; set; }
     public bool IsConnected { get; set; }
+
+    // Streams & commands reported by the Discovery Server
+    public List<string> Streams { get; set; } = new();
+    public List<string> Commands { get; set; } = new();
+
+    // Tally
+    public bool TallyOnProgram { get; set; }
+    public bool TallyOnPreview { get; set; }
 
     // Video properties (from source)
     public int Width { get; set; }
@@ -26,6 +35,8 @@ public class NDIReceiverInfo
 
     // General properties
     public string SdkVersion { get; set; } = string.Empty;
+    public string WebControlUrl { get; set; } = string.Empty;
+    public int DroppedFrames { get; set; }
     public DateTime LastSeen { get; set; } = DateTime.Now;
     public string Status => IsConnected ? "Connected" : "Idle";
 }

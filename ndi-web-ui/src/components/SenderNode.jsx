@@ -119,8 +119,9 @@ const styles = {
 };
 
 export default function SenderNode({ data }) {
-  const { name, hostName, width, height, frameRate, videoCodec, audioCodec,
-          audioChannels, audioSampleRate, connectionCount, status, connectionState } = data;
+  const { name, hostName, address, port, width, height, frameRate, videoCodec, audioCodec,
+          audioChannels, audioSampleRate, connectionCount, status, connectionState,
+          groups, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames } = data;
 
   const isActive = status === 'Active';
   const colorScheme = getColorScheme(isActive, connectionState);
@@ -152,11 +153,48 @@ export default function SenderNode({ data }) {
         }
       `}</style>
 
+      {/* Tally Bar */}
+      {(tallyOnProgram || tallyOnPreview) && (
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          marginBottom: '8px',
+        }}>
+          {tallyOnProgram && (
+            <div style={{
+              flex: 1,
+              padding: '3px 0',
+              borderRadius: '4px',
+              backgroundColor: '#dc2626',
+              color: 'white',
+              textAlign: 'center',
+              fontSize: '11px',
+              fontWeight: '700',
+              letterSpacing: '0.05em',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>PGM</div>
+          )}
+          {tallyOnPreview && (
+            <div style={{
+              flex: 1,
+              padding: '3px 0',
+              borderRadius: '4px',
+              backgroundColor: '#16a34a',
+              color: 'white',
+              textAlign: 'center',
+              fontSize: '11px',
+              fontWeight: '700',
+              letterSpacing: '0.05em',
+            }}>PVW</div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.indicator(colorScheme, isActive)} />
-          <span>📡 SENDER</span>
+          <span>SENDER</span>
         </div>
         {connectionCount > 0 && (
           <span style={styles.badge(colorScheme)}>
@@ -218,6 +256,36 @@ export default function SenderNode({ data }) {
           <div style={styles.infoRow}>
             <span style={styles.label}>Audio:</span>
             <span style={styles.value}>{audioCodec} {audioChannels}ch/{audioSampleRate}Hz</span>
+          </div>
+        )}
+
+        {address && port > 0 && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Endpoint:</span>
+            <span style={styles.value}>{address}:{port}</span>
+          </div>
+        )}
+
+        {groups && groups.length > 0 && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Groups:</span>
+            <span style={styles.value}>{groups.join(', ')}</span>
+          </div>
+        )}
+
+        {droppedFrames > 0 && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Dropped:</span>
+            <span style={{ ...styles.value, color: '#f87171' }}>{droppedFrames}</span>
+          </div>
+        )}
+
+        {webControlUrl && (
+          <div style={{ marginTop: '4px' }}>
+            <a href={webControlUrl} target="_blank" rel="noopener noreferrer"
+               style={{ color: '#93c5fd', fontSize: '11px', textDecoration: 'underline' }}>
+              Web Control
+            </a>
           </div>
         )}
       </div>

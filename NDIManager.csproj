@@ -11,9 +11,9 @@
     <!-- Add <ApplicationIcon>ndi-manager.ico</ApplicationIcon> when a custom icon is available -->
 
     <!-- Version Information -->
-    <Version>2.0.0</Version>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>2.0.0.0</FileVersion>
+    <Version>2.1.0</Version>
+    <AssemblyVersion>2.1.0.0</AssemblyVersion>
+    <FileVersion>2.1.0.0</FileVersion>
     <Company>NDI Manager</Company>
     <Product>NDI Manager</Product>
     <Description>NDI Discovery and Control Manager with Web UI</Description>
@@ -40,12 +40,19 @@
     <Content Remove="ThirdPartyLicenses\**" />
   </ItemGroup>
 
-  <!-- Copy NDI DLL to output -->
+  <!-- Copy NDI DLL to build output -->
   <ItemGroup>
     <None Include="C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Processing.NDI.Lib.x64.dll</Link>
     </None>
   </ItemGroup>
+
+  <!-- Ensure NDI DLL is also in publish output -->
+  <Target Name="CopyNdiDllToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll"
+          DestinationFolder="$(PublishDir)" />
+  </Target>
 
   <!-- Ensure wwwroot is copied to output directory -->
   <ItemGroup>

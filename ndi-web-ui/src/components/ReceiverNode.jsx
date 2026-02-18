@@ -93,8 +93,9 @@ const styles = {
 };
 
 export default function ReceiverNode({ data }) {
-  const { name, hostName, currentSource, isConnected, status, width, height,
-          frameRate, videoCodec, audioCodec, audioChannels, audioSampleRate } = data;
+  const { name, hostName, address, currentSource, isConnected, status, width, height,
+          frameRate, videoCodec, audioCodec, audioChannels, audioSampleRate,
+          streams, commands, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames } = data;
 
   return (
     <div style={styles.node(isConnected)}>
@@ -121,11 +122,48 @@ export default function ReceiverNode({ data }) {
         }}
       />
 
+      {/* Tally Bar */}
+      {(tallyOnProgram || tallyOnPreview) && (
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          marginBottom: '8px',
+        }}>
+          {tallyOnProgram && (
+            <div style={{
+              flex: 1,
+              padding: '3px 0',
+              borderRadius: '4px',
+              backgroundColor: '#dc2626',
+              color: 'white',
+              textAlign: 'center',
+              fontSize: '11px',
+              fontWeight: '700',
+              letterSpacing: '0.05em',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>PGM</div>
+          )}
+          {tallyOnPreview && (
+            <div style={{
+              flex: 1,
+              padding: '3px 0',
+              borderRadius: '4px',
+              backgroundColor: '#16a34a',
+              color: 'white',
+              textAlign: 'center',
+              fontSize: '11px',
+              fontWeight: '700',
+              letterSpacing: '0.05em',
+            }}>PVW</div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.indicator(isConnected)} />
-          <span>📺 RECEIVER</span>
+          <span>RECEIVER</span>
         </div>
         <span style={styles.badge(isConnected)}>
           {status}
@@ -169,6 +207,36 @@ export default function ReceiverNode({ data }) {
           <div style={styles.infoRow}>
             <span style={styles.label}>Audio:</span>
             <span style={styles.value}>{audioCodec} {audioChannels}ch/{audioSampleRate}Hz</span>
+          </div>
+        )}
+
+        {address && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Address:</span>
+            <span style={styles.value}>{address}</span>
+          </div>
+        )}
+
+        {streams && streams.length > 0 && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Streams:</span>
+            <span style={styles.value}>{streams.join(', ')}</span>
+          </div>
+        )}
+
+        {droppedFrames > 0 && (
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Dropped:</span>
+            <span style={{ ...styles.value, color: '#f87171' }}>{droppedFrames}</span>
+          </div>
+        )}
+
+        {webControlUrl && (
+          <div style={{ marginTop: '4px' }}>
+            <a href={webControlUrl} target="_blank" rel="noopener noreferrer"
+               style={{ color: '#93c5fd', fontSize: '11px', textDecoration: 'underline' }}>
+              Web Control
+            </a>
           </div>
         )}
 

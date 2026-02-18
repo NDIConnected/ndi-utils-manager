@@ -2,9 +2,17 @@ namespace NDIManager.Models;
 
 public class NDISenderInfo
 {
-    public string Id { get; set; } = string.Empty;  // UUID of the sender
+    public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string HostName { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public int Port { get; set; }
+    public string SourceMetadata { get; set; } = string.Empty;
+    public List<string> Groups { get; set; } = new();
+
+    // Tally
+    public bool TallyOnProgram { get; set; }
+    public bool TallyOnPreview { get; set; }
 
     // Video properties
     public int Width { get; set; }
@@ -29,6 +37,7 @@ public class NDISenderInfo
 
     // General properties
     public string SdkVersion { get; set; } = string.Empty;
+    public string WebControlUrl { get; set; } = string.Empty;
     public DateTime LastSeen { get; set; } = DateTime.Now;
     public string Status => ConnectionCount > 0 ? "Active" : "Idle";
 }

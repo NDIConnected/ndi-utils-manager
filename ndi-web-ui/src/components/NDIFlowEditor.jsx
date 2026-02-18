@@ -444,7 +444,7 @@ export default function NDIFlowEditor() {
 
   useEffect(() => {
     fetchDevices();
-    const interval = setInterval(fetchDevices, 2000);
+    const interval = setInterval(fetchDevices, 1000);
     return () => clearInterval(interval);
   }, [fetchDevices]);
 
@@ -482,7 +482,7 @@ export default function NDIFlowEditor() {
     <div style={styles.container}>
       <div style={styles.header}>
         <div style={styles.headerLeft}>
-          <h1 style={styles.title}>NDI Manager 6.3</h1>
+          <h1 style={styles.title}>NDI Manager</h1>
           <p style={styles.subtitle}>Drag from sender to receiver to connect</p>
         </div>
         <div style={styles.headerRight}>

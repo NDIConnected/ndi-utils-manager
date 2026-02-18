@@ -100,42 +100,44 @@ public class NDISendListener : IDisposable
             IntPtr currentPtr = IntPtr.Add(sendersPtr, i * structSize);
             var sender = Marshal.PtrToStructure<NDI.sender_t>(currentPtr);
 
-            // Debug logging to see all sender fields
             string uuid = sender.p_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_uuid) ?? "" : "";
             string name = sender.p_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_name) ?? "" : "";
             string metadata = sender.p_metadata != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_metadata) ?? "" : "";
             string address = sender.p_address != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_address) ?? "" : "";
 
-            Console.WriteLine($"[NDISendListener] Sender {i}:");
-            Console.WriteLine($"  UUID: {uuid}");
-            Console.WriteLine($"  Name: {name}");
-            Console.WriteLine($"  Metadata: {metadata}");
-            Console.WriteLine($"  Address: {address}");
-            Console.WriteLine($"  Port: {sender.port}");
-            Console.WriteLine($"  Num Groups: {sender.num_groups}");
-            Console.WriteLine($"  Events Subscribed: {sender.events_subscribed}");
+            // Parse groups: p_groups is an array of char* pointers
+            var groups = new List<string>();
+            if (sender.p_groups != IntPtr.Zero && sender.num_groups > 0)
+            {
+                for (uint g = 0; g < sender.num_groups; g++)
+                {
+                    IntPtr groupPtr = Marshal.ReadIntPtr(sender.p_groups, (int)(g * (uint)IntPtr.Size));
+                    if (groupPtr != IntPtr.Zero)
+                    {
+                        string groupName = Marshal.PtrToStringAnsi(groupPtr) ?? "";
+                        if (!string.IsNullOrEmpty(groupName))
+                            groups.Add(groupName);
+                    }
+                }
+            }
 
             var senderInfo = new NDISenderInfo
             {
                 Id = uuid,
                 Name = name,
                 HostName = address,
+                Address = address,
+                Port = sender.port,
+                SourceMetadata = metadata,
+                Groups = groups,
                 LastSeen = DateTime.Now
             };
 
-            if (string.IsNullOrEmpty(metadata))
-            {
-                Console.WriteLine($"[NDISendListener] No metadata available for {name}");
-            }
-
             senderList.Add(senderInfo);
 
-            // AUTOMATIC EVENT SUBSCRIPTION
-            // Subscribe to events if not already subscribed
             if (!sender.events_subscribed && !string.IsNullOrEmpty(uuid))
             {
                 SubscribeEvents(uuid);
-                Console.WriteLine($"[NDISendListener] Subscribed to events for sender: {name}");
             }
         }
 

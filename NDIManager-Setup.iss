@@ -2,7 +2,7 @@
 ; Version 2.0 - Standalone Application (System Tray)
 
 #define MyAppName "NDI Manager"
-#define MyAppVersion "2.0"
+#define MyAppVersion "2.1"
 #define MyAppPublisher "Vizrt NDI AB"
 #define MyAppExeName "NDIManager.exe"
 

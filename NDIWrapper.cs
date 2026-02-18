@@ -48,6 +48,31 @@ public static class NDI
         highest = 100
     }
 
+    public enum frame_type
+    {
+        None = 0,
+        Video = 1,
+        Audio = 2,
+        Metadata = 3,
+        Error = 4,
+        StatusChange = 100,
+        SourceChange = 101
+    }
+
+    public enum receiver_type : uint
+    {
+        None = 0,
+        Metadata = 1,
+        Video = 2,
+        Audio = 3
+    }
+
+    public enum receiver_command : uint
+    {
+        None = 0,
+        Connect = 1
+    }
+
     #endregion
 
     #region Structures
@@ -77,14 +102,6 @@ public static class NDI
     {
         public IntPtr p_ndi_name;
         public IntPtr p_url_address;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct source_v2_t
-    {
-        public IntPtr p_ndi_name;
-        public IntPtr p_url_address;
-        public IntPtr p_metadata;  // Source metadata including UUID
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -119,7 +136,37 @@ public static class NDI
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct metadata_frame_t
+    {
+        public int length;
+        public long timecode;
+        public IntPtr p_data;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct recv_performance_t
+    {
+        public long video_frames;
+        public long audio_frames;
+        public long metadata_frames;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct recv_queue_t
+    {
+        public int video_frames;
+        public int audio_frames;
+        public int metadata_frames;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct send_advertiser_create_t
+    {
+        public IntPtr p_url_address;  // UTF-8 string - Discovery Server URL
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct recv_advertiser_create_t
     {
         public IntPtr p_url_address;  // UTF-8 string - Discovery Server URL
     }
@@ -239,9 +286,6 @@ public static class NDI
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_find_get_current_sources(IntPtr p_instance, ref uint p_no_sources);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr NDIlib_find_get_current_sources_v2(IntPtr p_instance, ref uint p_no_sources);
-
     // Receiver API
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_recv_create_v3(ref recv_create_v3_t p_create_settings);
@@ -251,6 +295,29 @@ public static class NDI
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern void NDIlib_recv_connect(IntPtr p_instance, ref source_t p_source);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool NDIlib_recv_set_tally(IntPtr p_instance, ref tally_t p_tally);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_get_performance(IntPtr p_instance, ref recv_performance_t p_total, ref recv_performance_t p_dropped);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_get_queue(IntPtr p_instance, ref recv_queue_t p_total);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr NDIlib_recv_get_web_control(IntPtr p_instance);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_free_string(IntPtr p_instance, IntPtr p_string);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool NDIlib_recv_send_metadata(IntPtr p_instance, ref metadata_frame_t p_metadata);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int NDIlib_recv_get_no_connections(IntPtr p_instance);
 
     // SendAdvertiser API - NDI 6
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -336,6 +403,25 @@ public static class NDI
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern void NDIlib_recv_listener_free_events(IntPtr p_instance, IntPtr p_events);
+
+    // RecvAdvertiser API - NDI 6
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr NDIlib_recv_advertiser_create(ref recv_advertiser_create_t p_create_settings);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_advertiser_destroy(IntPtr p_instance);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool NDIlib_recv_advertiser_add_receiver(
+        IntPtr p_instance, IntPtr p_receiver,
+        [MarshalAs(UnmanagedType.U1)] bool allow_controlling,
+        [MarshalAs(UnmanagedType.U1)] bool allow_monitoring,
+        IntPtr p_input_group_name);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool NDIlib_recv_advertiser_del_receiver(IntPtr p_instance, IntPtr p_receiver);
 
     #endregion
 }

@@ -85,7 +85,10 @@ public class NDIRecvListener : IDisposable
         var receiverList = new List<NDIReceiverInfo>();
 
         if (_listenerInstance == IntPtr.Zero)
+        {
+            Console.WriteLine("[NDIRecvListener] WARNING: listener instance is NULL");
             return receiverList;
+        }
 
         uint numReceivers = 0;
         IntPtr receiversPtr = NDI.NDIlib_recv_listener_get_receivers(_listenerInstance, ref numReceivers);
@@ -94,46 +97,78 @@ public class NDIRecvListener : IDisposable
             return receiverList;
 
         int structSize = Marshal.SizeOf<NDI.receiver_t>();
+        Console.WriteLine($"[NDIRecvListener] get_receivers returned {numReceivers} receivers, structSize={structSize}");
 
         for (int i = 0; i < numReceivers; i++)
         {
-            IntPtr currentPtr = IntPtr.Add(receiversPtr, i * structSize);
-            var receiver = Marshal.PtrToStructure<NDI.receiver_t>(currentPtr);
-
-            // Debug logging to see raw values from Discovery Server
-            string uuid = receiver.p_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_uuid) ?? "" : "";
-            string name = receiver.p_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_name) ?? "" : "";
-            string inputUuid = receiver.p_input_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_input_uuid) ?? "" : "";
-            string inputName = receiver.p_input_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_input_name) ?? "" : "";
-            string address = receiver.p_address != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_address) ?? "" : "";
-
-            Console.WriteLine($"[NDIRecvListener] Receiver {i}:");
-            Console.WriteLine($"  UUID: {uuid}");
-            Console.WriteLine($"  Name: {name}");
-            Console.WriteLine($"  Input UUID: {inputUuid}");
-            Console.WriteLine($"  Input Name: {inputName}");
-            Console.WriteLine($"  Address: {address}");
-            Console.WriteLine($"  Num Streams: {receiver.num_streams}");
-            Console.WriteLine($"  Num Commands: {receiver.num_commands}");
-            Console.WriteLine($"  Events Subscribed: {receiver.events_subscribed}");
-
-            var receiverInfo = new NDIReceiverInfo
+            try
             {
-                Id = uuid,
-                Name = name,
-                InputUuid = !string.IsNullOrEmpty(inputUuid) ? inputUuid : null,
-                CurrentSource = !string.IsNullOrEmpty(inputName) ? inputName : null,
-                IsConnected = !string.IsNullOrEmpty(inputUuid),  // Connected if has an input UUID
-                LastSeen = DateTime.Now
-            };
+                IntPtr currentPtr = IntPtr.Add(receiversPtr, i * structSize);
+                var receiver = Marshal.PtrToStructure<NDI.receiver_t>(currentPtr);
 
-            receiverList.Add(receiverInfo);
+                string uuid = receiver.p_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_uuid) ?? "" : "";
+                string name = receiver.p_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_name) ?? "" : "";
+                string inputUuid = receiver.p_input_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_input_uuid) ?? "" : "";
+                string inputName = receiver.p_input_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_input_name) ?? "" : "";
+                string address = receiver.p_address != IntPtr.Zero ? Marshal.PtrToStringAnsi(receiver.p_address) ?? "" : "";
 
-            // Automatically subscribe to events if not already subscribed
-            if (!receiver.events_subscribed && !string.IsNullOrEmpty(uuid))
+                Console.WriteLine($"[NDIRecvListener] Receiver {i}: UUID={uuid}, Name={name}, Address={address}, Streams={receiver.num_streams}, Commands={receiver.num_commands}");
+
+                // Parse streams: p_streams is an array of receiver_type enum values (uint32)
+                var streams = new List<string>();
+                if (receiver.p_streams != IntPtr.Zero && receiver.num_streams > 0)
+                {
+                    for (uint s = 0; s < receiver.num_streams; s++)
+                    {
+                        int val = Marshal.ReadInt32(receiver.p_streams, (int)(s * sizeof(int)));
+                        streams.Add(((NDI.receiver_type)val) switch
+                        {
+                            NDI.receiver_type.Video => "video",
+                            NDI.receiver_type.Audio => "audio",
+                            NDI.receiver_type.Metadata => "metadata",
+                            _ => $"unknown({val})"
+                        });
+                    }
+                }
+
+                // Parse commands: p_commands is an array of receiver_command enum values (uint32)
+                var commands = new List<string>();
+                if (receiver.p_commands != IntPtr.Zero && receiver.num_commands > 0)
+                {
+                    for (uint c = 0; c < receiver.num_commands; c++)
+                    {
+                        int val = Marshal.ReadInt32(receiver.p_commands, (int)(c * sizeof(int)));
+                        commands.Add(((NDI.receiver_command)val) switch
+                        {
+                            NDI.receiver_command.Connect => "connect",
+                            _ => $"unknown({val})"
+                        });
+                    }
+                }
+
+                var receiverInfo = new NDIReceiverInfo
+                {
+                    Id = uuid,
+                    Name = name,
+                    Address = address,
+                    InputUuid = !string.IsNullOrEmpty(inputUuid) ? inputUuid : null,
+                    CurrentSource = !string.IsNullOrEmpty(inputName) ? inputName : null,
+                    IsConnected = !string.IsNullOrEmpty(inputUuid),
+                    Streams = streams,
+                    Commands = commands,
+                    LastSeen = DateTime.Now
+                };
+
+                receiverList.Add(receiverInfo);
+
+                if (!receiver.events_subscribed && !string.IsNullOrEmpty(uuid))
+                {
+                    SubscribeEvents(uuid);
+                }
+            }
+            catch (Exception ex)
             {
-                SubscribeEvents(uuid);
-                Console.WriteLine($"[NDIRecvListener] Subscribed to events for receiver: {name}");
+                Console.WriteLine($"[NDIRecvListener] ERROR parsing receiver {i}: {ex.Message}");
             }
         }
 
