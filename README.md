@@ -1,31 +1,31 @@
 # NDI Manager 6.3
 
-Applicazione Windows (.NET 9) che gira in **system tray**, espone un’**API ASP.NET Core** e una **Web UI** per discovery e gestione delle connessioni NDI (send/receive, flusso visuale con React Flow).
+Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
 Repository: https://github.com/NDIConnected/ndi-utils-manager
 
-## Requisiti
+## Requirements
 
 - Windows x64  
 - [.NET SDK 9](https://dotnet.microsoft.com/download)  
-- **NDI SDK 6** installato, con la DLL in  
+- **NDI SDK 6** installed, with the DLL at  
   `C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll`  
-  (come da riferimento nel file di progetto)  
-- Per sviluppare o ricompilare la UI: Node.js (vedi cartella `ndi-web-ui`)
+  (as referenced by the project file)  
+- Node.js to develop or rebuild the UI (see the `ndi-web-ui` folder)
 
-## Avvio in sviluppo
+## Development run
 
-Dalla root del repository:
+From the repository root:
 
 ```powershell
 dotnet run
 ```
 
-L’app si avvia in tray; dalla tray puoi aprire la **Web UI** (di default `http://localhost:5000`, porta configurabile dal menu).
+The app starts in the tray; use the tray menu to open the **Web UI** (default `http://localhost:5000`, port configurable from the menu).
 
 ## Web UI (frontend)
 
-Cartella `ndi-web-ui`: istruzioni in [ndi-web-ui/README.md](ndi-web-ui/README.md).
+See the `ndi-web-ui` folder and [ndi-web-ui/README.md](ndi-web-ui/README.md).
 
 ```powershell
 cd ndi-web-ui
@@ -33,23 +33,23 @@ npm install
 npm run dev
 ```
 
-In produzione il backend serve i file statici da `wwwroot/` (vedi sotto).
+In production the backend serves static files from `wwwroot/` (see below).
 
-## Build installer e pacchetto di release
+## Installer and release packaging
 
-Procedura completa (frontend → `wwwroot` → publish → Inno Setup):  
+Full pipeline (frontend → `wwwroot` → publish → Inno Setup):  
 [INSTALLER_README.md](INSTALLER_README.md).
 
-## Documentazione aggiuntiva
+## Further documentation
 
-- [DOCS/](DOCS/) — note di implementazione e guide  
+- [DOCS/](DOCS/) — implementation notes and guides  
 - [CHANGELOG.md](CHANGELOG.md)
 
-## Struttura (semplificata)
+## Layout (simplified)
 
-| Percorso | Contenuto |
-|----------|-----------|
-| `Controllers/`, `Services/` | API e discovery NDI |
+| Path | Contents |
+|------|----------|
+| `Controllers/`, `Services/` | API and NDI discovery |
 | `ndi-web-ui/` | React + Vite |
-| `wwwroot/` | Output UI servito dall’app (generato dalla build, non versionato) |
-| `NDIManager-Setup.iss` | Script installer Inno Setup |
+| `wwwroot/` | Built UI served by the app (build output, not versioned) |
+| `NDIManager-Setup.iss` | Inno Setup installer script |
