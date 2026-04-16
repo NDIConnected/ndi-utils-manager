@@ -1,6 +1,10 @@
 using NDIManager.Models;
+using Microsoft.Extensions.Configuration;
+using NDIManager;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace NDIManager.Services;
 
@@ -17,7 +21,10 @@ public class NDIDiscoveryService : BackgroundService
     private readonly System.Threading.Timer _discoveryTimer;
     private IntPtr _finderInstance = IntPtr.Zero;
 
-    public NDIDiscoveryService(ILogger<NDIDiscoveryService> logger)
+    public NDIDiscoveryService(
+        ILogger<NDIDiscoveryService> logger,
+        ILoggerFactory loggerFactory,
+        IConfiguration configuration)
     {
         _logger = logger;
         _senders = new ConcurrentDictionary<string, NDISenderInfo>();
@@ -25,9 +32,8 @@ public class NDIDiscoveryService : BackgroundService
         _receiverSourceNames = new ConcurrentDictionary<string, string>();
         _senderEventCache = new ConcurrentDictionary<string, Dictionary<string, string>>();
         _receiverEventCache = new ConcurrentDictionary<string, Dictionary<string, string>>();
-        _sendListener = new NDISendListener();
-        _recvListener = new NDIRecvListener();
 
+        // NDIlib_initialize MUST run before send_listener / recv_listener create (SDK §18).
         if (!NDI.NDIlib_initialize())
         {
             throw new Exception("Failed to initialize NDI library");
@@ -35,11 +41,30 @@ public class NDIDiscoveryService : BackgroundService
 
         _logger.LogInformation("NDI SDK initialized successfully");
 
-        // Log listener connection status
-        _logger.LogInformation($"SendListener connected to Discovery Server: {_sendListener.IsConnected}");
-        _logger.LogInformation($"SendListener server URL: {_sendListener.ServerUrl ?? "NULL"}");
-        _logger.LogInformation($"RecvListener connected to Discovery Server: {_recvListener.IsConnected}");
-        _logger.LogInformation($"RecvListener server URL: {_recvListener.ServerUrl ?? "NULL"}");
+        var sendLogger = loggerFactory.CreateLogger<NDISendListener>();
+        var recvLogger = loggerFactory.CreateLogger<NDIRecvListener>();
+        _sendListener = new NDISendListener(sendLogger);
+        _recvListener = new NDIRecvListener(recvLogger);
+
+        var discoveryUrl = ResolveDiscoveryServerUrl(configuration);
+        _logger.LogInformation(
+            "NDI Discovery Server URL: {Url}",
+            string.IsNullOrEmpty(discoveryUrl) ? "(SDK default — null p_url_address)" : discoveryUrl);
+
+        if (!_sendListener.Initialize(discoveryUrl))
+        {
+            _logger.LogError("NDISendListener failed to initialize; sender monitoring and tally will be unavailable.");
+        }
+
+        if (!_recvListener.Initialize(discoveryUrl))
+        {
+            _logger.LogError("NDIRecvListener failed to initialize; receiver discovery/commands may be unavailable.");
+        }
+
+        _logger.LogInformation("SendListener connected={Connected}, server_url={ServerUrl}",
+            _sendListener.IsConnected, _sendListener.ServerUrl ?? "NULL");
+        _logger.LogInformation("RecvListener connected={Connected}, server_url={ServerUrl}",
+            _recvListener.IsConnected, _recvListener.ServerUrl ?? "NULL");
 
         // Initialize NDI Finder for source discovery
         var finderSettings = new NDI.find_create_t
@@ -77,29 +102,38 @@ public class NDIDiscoveryService : BackgroundService
     {
         try
         {
-            // Get senders from NDI Discovery Server
+            // Send Listener: wait (non-blocking) → get_senders → subscribe by uuid → get_events → merge cache (SDK §18).
+            _sendListener.WaitForSenders(0);
             var senders = _sendListener.GetSenders();
 
-            // Update senders dictionary with UUID as key
+            var senderEvents = _sendListener.GetEvents(0);
+            foreach (var evt in senderEvents)
+            {
+                if (string.IsNullOrEmpty(evt.SenderUuid))
+                    continue;
+
+                var eventData = _senderEventCache.GetOrAdd(evt.SenderUuid, _ => new Dictionary<string, string>());
+                lock (eventData)
+                {
+                    eventData[evt.EventName] = evt.EventValue;
+                }
+            }
+
             _senders.Clear();
             var sendersByUuid = new Dictionary<string, NDISenderInfo>();
             foreach (var sender in senders)
             {
-                // Populate sender properties from cached event data
                 if (!string.IsNullOrEmpty(sender.Id) && _senderEventCache.TryGetValue(sender.Id, out var eventData))
                 {
                     lock (eventData)
                     {
-                        // Parse connection count
                         if (eventData.TryGetValue("connected-receivers", out var connectionsStr) && int.TryParse(connectionsStr, out var connections))
                         {
                             sender.ConnectionCount = connections;
                         }
 
-                        // Parse video resolution
                         if (eventData.TryGetValue("video-resolution", out var resolutionStr))
                         {
-                            // Format: "1920x1080"
                             var resolution = resolutionStr.Split('x');
                             if (resolution.Length == 2 && int.TryParse(resolution[0], out var width) && int.TryParse(resolution[1], out var height))
                             {
@@ -108,10 +142,8 @@ public class NDIDiscoveryService : BackgroundService
                             }
                         }
 
-                        // Parse video frame rate
                         if (eventData.TryGetValue("video-frame-rate", out var frameRateStr))
                         {
-                            // Format: "50/1" or "50000/1000"
                             var parts = frameRateStr.Split('/');
                             if (parts.Length == 2 && int.TryParse(parts[0], out var n) && int.TryParse(parts[1], out var d))
                             {
@@ -120,73 +152,65 @@ public class NDIDiscoveryService : BackgroundService
                             }
                         }
 
-                        // Parse video codec
                         if (eventData.TryGetValue("video-codec", out var videoCodec))
                         {
                             sender.VideoCodec = videoCodec.ToUpper();
                         }
 
-                        // Parse video frame type
                         if (eventData.TryGetValue("video-frame-type", out var frameType))
                         {
                             sender.VideoFrameType = frameType;
                         }
 
-                        // Parse video has alpha
                         if (eventData.TryGetValue("video-has-alpha", out var hasAlphaStr) && bool.TryParse(hasAlphaStr, out var hasAlpha))
                         {
                             sender.VideoHasAlpha = hasAlpha;
                         }
+                        if (eventData.TryGetValue("video-present", out var videoPresentStr) && bool.TryParse(videoPresentStr, out var videoPresent))
+                        {
+                            sender.VideoPresent = videoPresent;
+                        }
 
-                        // Parse audio codec
                         if (eventData.TryGetValue("audio-codec", out var audioCodec))
                         {
                             sender.AudioCodec = audioCodec.ToUpper();
                         }
 
-                        // Parse audio channels
                         if (eventData.TryGetValue("audio-channels", out var channelsStr) && int.TryParse(channelsStr, out var channels))
                         {
                             sender.AudioChannels = channels;
                         }
 
-                        // Parse audio sample rate
                         if (eventData.TryGetValue("audio-sample-rate", out var sampleRateStr) && int.TryParse(sampleRateStr, out var sampleRate))
                         {
                             sender.AudioSampleRate = sampleRate;
                         }
+                        if (eventData.TryGetValue("audio-present", out var audioPresentStr) && bool.TryParse(audioPresentStr, out var audioPresent))
+                        {
+                            sender.AudioPresent = audioPresent;
+                        }
 
-                        // Parse SDK version
                         if (eventData.TryGetValue("sdk-version", out var sdkVersion))
                         {
                             sender.SdkVersion = sdkVersion;
                         }
 
-                        // Calculate approximate bandwidth from video bytes sent
                         if (eventData.TryGetValue("video-bytes-sent", out var videoBytesStr) && long.TryParse(videoBytesStr, out var videoBytes))
                         {
-                            // This is cumulative, so we'd need to track delta over time
-                            // For now, just store the total bytes
                             sender.BytesPerSecond = videoBytes;
                         }
 
-                        // Parse dropped frames
                         if (eventData.TryGetValue("video-frames-dropped", out var droppedStr) && int.TryParse(droppedStr, out var dropped))
                         {
                             sender.DroppedFrames = dropped;
                         }
 
-                        // Parse tally state
-                        if (eventData.TryGetValue("tally-on-program", out var pgmStr) && bool.TryParse(pgmStr, out var pgm))
-                        {
-                            sender.TallyOnProgram = pgm;
-                        }
-                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr) && bool.TryParse(pvwStr, out var pvw))
-                        {
-                            sender.TallyOnPreview = pvw;
-                        }
+                        // Tally: p_value is the string "true" or "false" (not general bool parsing).
+                        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
+                            sender.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
+                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
+                            sender.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
 
-                        // Parse web control URL
                         if (eventData.TryGetValue("web-control", out var webControl))
                         {
                             sender.WebControlUrl = webControl;
@@ -201,26 +225,7 @@ public class NDIDiscoveryService : BackgroundService
                 }
             }
 
-            _logger.LogDebug($"Discovered {senders.Count} NDI senders from Discovery Server");
-
-            // Get events from senders and update persistent cache
-            var senderEvents = _sendListener.GetEvents(0);  // 0 = non-blocking
-            foreach (var evt in senderEvents)
-            {
-                Console.WriteLine($"[NDISendListener Event] UUID: {evt.SenderUuid}, Name: {evt.EventName}, Value: {evt.EventValue}");
-
-                // Cache event data for each sender
-                if (!string.IsNullOrEmpty(evt.SenderUuid))
-                {
-                    var eventData = _senderEventCache.GetOrAdd(evt.SenderUuid, _ => new Dictionary<string, string>());
-
-                    // Update or add the event value
-                    lock (eventData)
-                    {
-                        eventData[evt.EventName] = evt.EventValue;
-                    }
-                }
-            }
+            _logger.LogDebug("Discovered {Count} NDI senders from Discovery Server", senders.Count);
 
             // Discover actual NDI sources using NDI Finder (standard API)
             var sourcesByName = new Dictionary<string, string>();
@@ -248,45 +253,29 @@ public class NDIDiscoveryService : BackgroundService
                 }
             }
 
-            // Get receivers from NDI Discovery Server
+            _recvListener.WaitForReceivers(0);
             var receivers = _recvListener.GetReceivers();
             _logger.LogDebug("RecvListener connected={Connected}, receivers={Count}",
                 _recvListener.IsConnected, receivers.Count);
 
-            // Get events from receivers and update persistent cache
-            var events = _recvListener.GetEvents(0);  // 0 = non-blocking
-            foreach (var evt in events)
+            var recvEvents = _recvListener.GetEvents(0);
+            foreach (var evt in recvEvents)
             {
-                Console.WriteLine($"[NDIRecvListener Event] UUID: {evt.ReceiverUuid}, Name: {evt.EventName}, Value: {evt.EventValue}");
-
-                // Extract source-name events and save to persistent cache
                 if (evt.EventName == "source-name")
                 {
                     if (!string.IsNullOrEmpty(evt.EventValue))
-                    {
-                        Console.WriteLine($"[RECEIVER EVENT] source-name SET for {evt.ReceiverUuid}: {evt.EventValue}");
                         _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue;
-                    }
-                    // Don't remove source-name on empty value - wait for connection-state: disconnected instead
-                    // This prevents flickering when connecting audio-only sources
                 }
 
-                // Remove source-name when connection-state becomes disconnected
                 if (evt.EventName == "connection-state" && evt.EventValue == "disconnected")
                 {
                     if (_receiverSourceNames.ContainsKey(evt.ReceiverUuid))
-                    {
-                        Console.WriteLine($"[RECEIVER EVENT] source-name CLEARED for {evt.ReceiverUuid} (connection-state: disconnected)");
                         _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
-                    }
                 }
 
-                // Cache all event data for each receiver
                 if (!string.IsNullOrEmpty(evt.ReceiverUuid))
                 {
                     var eventData = _receiverEventCache.GetOrAdd(evt.ReceiverUuid, _ => new Dictionary<string, string>());
-
-                    // Update or add the event value
                     lock (eventData)
                     {
                         eventData[evt.EventName] = evt.EventValue;
@@ -355,6 +344,10 @@ public class NDIDiscoveryService : BackgroundService
                         {
                             receiver.VideoHasAlpha = hasAlpha;
                         }
+                        if (eventData.TryGetValue("video-present", out var videoPresentStr) && bool.TryParse(videoPresentStr, out var videoPresent))
+                        {
+                            receiver.VideoPresent = videoPresent;
+                        }
 
                         // Parse audio codec
                         if (eventData.TryGetValue("audio-codec", out var audioCodec))
@@ -373,6 +366,10 @@ public class NDIDiscoveryService : BackgroundService
                         {
                             receiver.AudioSampleRate = sampleRate;
                         }
+                        if (eventData.TryGetValue("audio-present", out var audioPresentStr) && bool.TryParse(audioPresentStr, out var audioPresent))
+                        {
+                            receiver.AudioPresent = audioPresent;
+                        }
 
                         // Parse SDK version
                         if (eventData.TryGetValue("sdk-version", out var sdkVersion))
@@ -380,15 +377,10 @@ public class NDIDiscoveryService : BackgroundService
                             receiver.SdkVersion = sdkVersion;
                         }
 
-                        // Parse tally state
-                        if (eventData.TryGetValue("tally-on-program", out var pgmStr) && bool.TryParse(pgmStr, out var pgm))
-                        {
-                            receiver.TallyOnProgram = pgm;
-                        }
-                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr) && bool.TryParse(pvwStr, out var pvw))
-                        {
-                            receiver.TallyOnPreview = pvw;
-                        }
+                        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
+                            receiver.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
+                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
+                            receiver.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
 
                         // Parse web control URL
                         if (eventData.TryGetValue("web-control", out var webControl))
@@ -424,6 +416,559 @@ public class NDIDiscoveryService : BackgroundService
     {
         return _receivers.Values.OrderBy(r => r.Name).ToList();
     }
+
+    public NDIAggregatedSnapshot GetAggregatedSnapshot()
+    {
+        var senders = GetSenders();
+        var receivers = GetReceivers();
+
+        var senderByName = senders
+            .Where(s => !string.IsNullOrWhiteSpace(s.Name))
+            .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var senderDevices = new Dictionary<string, NDIMultiDevice>(StringComparer.OrdinalIgnoreCase);
+        var receiverDevices = new Dictionary<string, NDIMultiDevice>(StringComparer.OrdinalIgnoreCase);
+        var senderChannelsByName = new Dictionary<string, NDIMultiChannel>(StringComparer.OrdinalIgnoreCase);
+        var senderChannelsByAppChannel = new Dictionary<string, NDIMultiChannel>(StringComparer.OrdinalIgnoreCase);
+        var senderAppByDeviceId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var receiverChannelsByUuid = new Dictionary<string, NDIMultiChannel>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sender in senders)
+        {
+            var parsed = ParseIntercomIdentity(sender.SourceMetadata, sender.Name);
+            var role = "sender";
+            var deviceHint = ResolveDeviceHint(parsed, sender.Address, sender.Id, sender.Name);
+            var deviceKey = $"{parsed.ApplicationId}:{role}:{deviceHint}";
+
+            if (!senderDevices.TryGetValue(deviceKey, out var device))
+            {
+                device = new NDIMultiDevice
+                {
+                    DeviceKey = deviceKey,
+                    Role = role,
+                    DisplayName = $"{parsed.ApplicationId} Sender",
+                    ApplicationId = parsed.ApplicationId,
+                    Status = sender.Status,
+                    Address = sender.Address
+                };
+                senderDevices[deviceKey] = device;
+            }
+
+            var channelId = !string.IsNullOrWhiteSpace(parsed.ChannelId)
+                ? parsed.ChannelId
+                : (!string.IsNullOrWhiteSpace(sender.Id) ? sender.Id : Guid.NewGuid().ToString("N"));
+
+            var channel = new NDIMultiChannel
+            {
+                ChannelId = channelId,
+                ChannelIndex = parsed.ChannelIndex,
+                StreamLabel = sender.Name,
+                EndpointUuid = sender.Id,
+                EndpointName = sender.Name,
+                Role = role,
+                IsConnected = sender.ConnectionCount > 0,
+                IsStreaming = IsChannelStreaming(
+                    sender.VideoPresent,
+                    sender.AudioPresent,
+                    sender.VideoCodec,
+                    sender.Width,
+                    sender.Height,
+                    sender.AudioCodec,
+                    sender.AudioChannels),
+                Address = sender.Address,
+                Port = sender.Port,
+                Width = sender.Width,
+                Height = sender.Height,
+                FrameRateN = sender.FrameRateN,
+                FrameRateD = sender.FrameRateD,
+                VideoCodec = sender.VideoCodec,
+                VideoHasAlpha = sender.VideoHasAlpha,
+                AudioCodec = sender.AudioCodec,
+                AudioChannels = sender.AudioChannels,
+                AudioSampleRate = sender.AudioSampleRate,
+                TallyOnProgram = sender.TallyOnProgram,
+                TallyOnPreview = sender.TallyOnPreview,
+                SdkVersion = sender.SdkVersion,
+                WebControlUrl = sender.WebControlUrl,
+                DroppedFrames = sender.DroppedFrames
+            };
+
+            device.Channels.Add(channel);
+            if (!string.IsNullOrWhiteSpace(sender.Name))
+                senderChannelsByName[sender.Name] = channel;
+
+            var appChannelKey = BuildAppChannelKey(parsed.ApplicationId, channel.ChannelId, channel.ChannelIndex);
+            if (!string.IsNullOrWhiteSpace(appChannelKey))
+                senderChannelsByAppChannel[appChannelKey] = channel;
+
+            if (parsed.ApplicationId != "unknown" && !string.IsNullOrWhiteSpace(parsed.DeviceId))
+                senderAppByDeviceId[parsed.DeviceId] = parsed.ApplicationId;
+        }
+
+        foreach (var receiver in receivers)
+        {
+            var parsed = ParseIntercomIdentity(string.Empty, receiver.Name);
+            if (parsed.ApplicationId == "unknown" &&
+                !string.IsNullOrWhiteSpace(receiver.CurrentSource) &&
+                senderByName.TryGetValue(receiver.CurrentSource, out var senderForSource))
+            {
+                var senderParsed = ParseIntercomIdentity(senderForSource.SourceMetadata, senderForSource.Name);
+                parsed = parsed with { ApplicationId = senderParsed.ApplicationId };
+            }
+
+            if (parsed.ApplicationId == "unknown" &&
+                !string.IsNullOrWhiteSpace(parsed.DeviceId) &&
+                senderAppByDeviceId.TryGetValue(parsed.DeviceId, out var inferredAppId))
+            {
+                parsed = parsed with { ApplicationId = inferredAppId };
+            }
+
+            var role = "receiver";
+            var deviceHint = ResolveDeviceHint(parsed, receiver.Address, receiver.Id, receiver.Name);
+            var deviceKey = $"{parsed.ApplicationId}:{role}:{deviceHint}";
+
+            if (!receiverDevices.TryGetValue(deviceKey, out var device))
+            {
+                device = new NDIMultiDevice
+                {
+                    DeviceKey = deviceKey,
+                    Role = role,
+                    DisplayName = $"{parsed.ApplicationId} Receiver",
+                    ApplicationId = parsed.ApplicationId,
+                    Status = receiver.Status,
+                    Address = receiver.Address
+                };
+                receiverDevices[deviceKey] = device;
+            }
+
+            var channelId = !string.IsNullOrWhiteSpace(parsed.ChannelId)
+                ? parsed.ChannelId
+                : (!string.IsNullOrWhiteSpace(receiver.Id) ? receiver.Id : Guid.NewGuid().ToString("N"));
+
+            var channel = new NDIMultiChannel
+            {
+                ChannelId = channelId,
+                ChannelIndex = parsed.ChannelIndex,
+                StreamLabel = receiver.Name,
+                EndpointUuid = receiver.Id,
+                EndpointName = receiver.Name,
+                Role = role,
+                IsConnected = receiver.IsConnected,
+                IsStreaming = IsChannelStreaming(
+                    receiver.VideoPresent,
+                    receiver.AudioPresent,
+                    receiver.VideoCodec,
+                    receiver.Width,
+                    receiver.Height,
+                    receiver.AudioCodec,
+                    receiver.AudioChannels),
+                CurrentSource = receiver.CurrentSource,
+                Address = receiver.Address,
+                Width = receiver.Width,
+                Height = receiver.Height,
+                FrameRateN = receiver.FrameRateN,
+                FrameRateD = receiver.FrameRateD,
+                VideoCodec = receiver.VideoCodec,
+                VideoHasAlpha = receiver.VideoHasAlpha,
+                AudioCodec = receiver.AudioCodec,
+                AudioChannels = receiver.AudioChannels,
+                AudioSampleRate = receiver.AudioSampleRate,
+                TallyOnProgram = receiver.TallyOnProgram,
+                TallyOnPreview = receiver.TallyOnPreview,
+                SdkVersion = receiver.SdkVersion,
+                WebControlUrl = receiver.WebControlUrl,
+                DroppedFrames = receiver.DroppedFrames,
+                Streams = receiver.Streams?.ToList() ?? new List<string>(),
+                Commands = receiver.Commands?.ToList() ?? new List<string>()
+            };
+
+            device.Channels.Add(channel);
+            if (!string.IsNullOrWhiteSpace(receiver.Id))
+                receiverChannelsByUuid[receiver.Id] = channel;
+        }
+
+        foreach (var device in senderDevices.Values)
+            device.Channels = device.Channels.OrderBy(c => c.ChannelIndex ?? int.MaxValue).ThenBy(c => c.StreamLabel).ToList();
+
+        foreach (var device in receiverDevices.Values)
+            device.Channels = device.Channels.OrderBy(c => c.ChannelIndex ?? int.MaxValue).ThenBy(c => c.StreamLabel).ToList();
+
+        foreach (var device in senderDevices.Values)
+            UpdateDeviceTechnicalSummaries(device);
+
+        foreach (var device in receiverDevices.Values)
+            UpdateDeviceTechnicalSummaries(device);
+
+        // If one side has stable identity and the other doesn't, infer by address as a best-effort fallback.
+        InferUnknownApplicationIdsByAddress(senderDevices.Values, receiverDevices.Values, "sender");
+        InferUnknownApplicationIdsByAddress(receiverDevices.Values, senderDevices.Values, "receiver");
+
+        var connections = new List<NDIMultiConnection>();
+        foreach (var receiver in receivers.Where(r => r.IsConnected && !string.IsNullOrWhiteSpace(r.CurrentSource)))
+        {
+            if (!receiverChannelsByUuid.TryGetValue(receiver.Id, out var receiverChannel))
+                continue;
+
+            NDIMultiChannel? senderChannel = null;
+            if (!senderChannelsByName.TryGetValue(receiver.CurrentSource!, out senderChannel))
+            {
+                var sourceIdentity = ParseIntercomIdentity(string.Empty, receiver.CurrentSource);
+                var sourceKey = BuildAppChannelKey(sourceIdentity.ApplicationId, sourceIdentity.ChannelId, sourceIdentity.ChannelIndex);
+                if (string.IsNullOrWhiteSpace(sourceKey) || !senderChannelsByAppChannel.TryGetValue(sourceKey, out senderChannel))
+                    continue;
+            }
+
+            var senderDevice = senderDevices.Values.FirstOrDefault(d => d.Channels.Any(c => c.ChannelId == senderChannel.ChannelId));
+            var receiverDevice = receiverDevices.Values.FirstOrDefault(d => d.Channels.Any(c => c.ChannelId == receiverChannel.ChannelId));
+            if (senderDevice == null || receiverDevice == null)
+                continue;
+
+            connections.Add(new NDIMultiConnection
+            {
+                ConnectionId = $"{senderChannel.ChannelId}->{receiverChannel.ChannelId}",
+                SenderDeviceKey = senderDevice.DeviceKey,
+                SenderChannelId = senderChannel.ChannelId,
+                SenderLabel = senderChannel.StreamLabel,
+                SenderUuid = senderChannel.EndpointUuid,
+                ReceiverDeviceKey = receiverDevice.DeviceKey,
+                ReceiverChannelId = receiverChannel.ChannelId,
+                ReceiverLabel = receiverChannel.StreamLabel,
+                ReceiverUuid = receiverChannel.EndpointUuid,
+                SourceName = receiver.CurrentSource ?? string.Empty
+            });
+        }
+
+        return new NDIAggregatedSnapshot
+        {
+            GeneratedAt = DateTime.UtcNow,
+            Senders = senderDevices.Values.OrderBy(d => d.DisplayName).ToList(),
+            Receivers = receiverDevices.Values.OrderBy(d => d.DisplayName).ToList(),
+            Connections = connections
+        };
+    }
+
+    private static IntercomIdentity ParseIntercomIdentity(
+        string? metadataXml,
+        string? fallbackName)
+    {
+        string appId = "unknown";
+        string? deviceId = null;
+        string? channelId = null;
+        int? channelIndex = null;
+
+        if (!string.IsNullOrWhiteSpace(metadataXml))
+        {
+            try
+            {
+                var xml = XDocument.Parse(metadataXml);
+                var intercomNode = xml.Descendants()
+                    .FirstOrDefault(x => string.Equals(x.Name.LocalName, "intercom", StringComparison.OrdinalIgnoreCase));
+
+                if (intercomNode != null)
+                {
+                    appId = intercomNode.Attribute("app_id")?.Value ?? appId;
+                    deviceId = intercomNode.Attribute("device_id")?.Value ?? deviceId;
+                    channelId = intercomNode.Attribute("channel_id")?.Value ?? channelId;
+
+                    var channelIndexRaw = intercomNode.Attribute("channel_index")?.Value;
+                    if (int.TryParse(channelIndexRaw, out var idx))
+                        channelIndex = idx;
+                }
+            }
+            catch
+            {
+                // Best-effort parser: silently fallback.
+            }
+        }
+
+        if (channelIndex == null && !string.IsNullOrWhiteSpace(fallbackName))
+        {
+            var match = Regex.Match(fallbackName, @"(?:CH|Channel)\s*0*(\d+)", RegexOptions.IgnoreCase);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var idx))
+                channelIndex = idx;
+        }
+
+        if (appId == "unknown" && !string.IsNullOrWhiteSpace(fallbackName))
+        {
+            var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([A-Za-z0-9_.-]+)", RegexOptions.IgnoreCase);
+            if (appMatch.Success)
+                appId = appMatch.Groups[1].Value;
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId) && TryExtractNameToken(fallbackName, "device", out var tokenDevice))
+            deviceId = tokenDevice;
+
+        if (TryExtractNameToken(fallbackName, "channel_id", out var tokenChannelId))
+            channelId = tokenChannelId;
+
+        if (TryExtractNameToken(fallbackName, "ch", out var tokenCh))
+        {
+            if (string.IsNullOrWhiteSpace(channelId))
+                channelId = tokenCh;
+            if (channelIndex == null && TryParseChannelIndex(tokenCh, out var idx))
+                channelIndex = idx;
+        }
+
+        if (channelIndex == null && TryExtractNameToken(fallbackName, "channel", out var tokenChannel) &&
+            TryParseChannelIndex(tokenChannel, out var chIdx))
+        {
+            channelIndex = chIdx;
+        }
+
+        if (string.IsNullOrWhiteSpace(channelId) && channelIndex != null)
+            channelId = $"ch-{channelIndex.Value}";
+
+        appId = SanitizeIdentity(appId, "unknown");
+        deviceId = string.IsNullOrWhiteSpace(deviceId) ? null : SanitizeIdentity(deviceId, "device");
+        channelId = string.IsNullOrWhiteSpace(channelId) ? null : SanitizeIdentity(channelId, "ch");
+
+        return new IntercomIdentity(appId, deviceId, channelId, channelIndex);
+    }
+
+    private static string SanitizeIdentity(string? value, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        var cleaned = Regex.Replace(value.Trim(), @"[^A-Za-z0-9_.-]+", "-");
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return fallback;
+
+        // Treat placeholder tokens as missing identity values.
+        if (cleaned.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("null", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("n-a", StringComparison.OrdinalIgnoreCase) ||
+            cleaned.Equals("na", StringComparison.OrdinalIgnoreCase))
+        {
+            return fallback;
+        }
+
+        return cleaned;
+    }
+
+    private static bool TryExtractNameToken(string? source, string key, out string value)
+    {
+        value = string.Empty;
+        if (string.IsNullOrWhiteSpace(source))
+            return false;
+
+        var tokenMatch = Regex.Match(
+            source,
+            $@"(?:^|[\[\s;]){Regex.Escape(key)}\s*=\s*([A-Za-z0-9_.-]+)",
+            RegexOptions.IgnoreCase);
+
+        if (!tokenMatch.Success)
+            return false;
+
+        value = tokenMatch.Groups[1].Value;
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool TryParseChannelIndex(string raw, out int index)
+    {
+        index = 0;
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var m = Regex.Match(raw, @"(?:ch[-_]?)?0*(\d+)$", RegexOptions.IgnoreCase);
+        return m.Success && int.TryParse(m.Groups[1].Value, out index);
+    }
+
+    private static void InferUnknownApplicationIdsByAddress(
+        IEnumerable<NDIMultiDevice> unknownSide,
+        IEnumerable<NDIMultiDevice> knownSide,
+        string roleLabel)
+    {
+        var knownAppByAddressAndDeviceHint = knownSide
+            .Where(d =>
+                !string.IsNullOrWhiteSpace(d.Address) &&
+                d.ApplicationId != "unknown" &&
+                TryGetStableDeviceHint(d, out _))
+            .Select(d => new
+            {
+                d.ApplicationId,
+                d.Address,
+                DeviceHint = GetDeviceHintFromDeviceKey(d.DeviceKey)
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.DeviceHint))
+            .GroupBy(x => $"{x.Address}|{x.DeviceHint}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.ApplicationId).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var device in unknownSide.Where(d =>
+                     d.ApplicationId == "unknown" &&
+                     !string.IsNullOrWhiteSpace(d.Address) &&
+                     TryGetStableDeviceHint(d, out _)))
+        {
+            var unknownHint = GetDeviceHintFromDeviceKey(device.DeviceKey);
+            if (string.IsNullOrWhiteSpace(unknownHint))
+                continue;
+
+            var lookupKey = $"{device.Address}|{unknownHint}";
+            if (!knownAppByAddressAndDeviceHint.TryGetValue(lookupKey, out var appIds))
+                continue;
+            if (appIds.Count != 1)
+                continue;
+
+            device.ApplicationId = appIds[0];
+            device.DisplayName = $"{device.ApplicationId} {(roleLabel == "sender" ? "Sender" : "Receiver")}";
+        }
+    }
+
+    private static bool TryGetStableDeviceHint(NDIMultiDevice device, out string hint)
+    {
+        hint = GetDeviceHintFromDeviceKey(device.DeviceKey);
+        if (string.IsNullOrWhiteSpace(hint))
+            return false;
+        if (string.IsNullOrWhiteSpace(device.Address))
+            return false;
+
+        // If hint equals address, it's just the address fallback (not stable enough).
+        return !string.Equals(hint, device.Address, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetDeviceHintFromDeviceKey(string deviceKey)
+    {
+        if (string.IsNullOrWhiteSpace(deviceKey))
+            return string.Empty;
+
+        var idx = deviceKey.LastIndexOf(':');
+        if (idx < 0 || idx >= deviceKey.Length - 1)
+            return string.Empty;
+
+        return deviceKey[(idx + 1)..].Trim();
+    }
+
+    private static string? BuildAppChannelKey(string appId, string? channelId, int? channelIndex)
+    {
+        var safeApp = SanitizeIdentity(appId, "unknown");
+        if (!string.IsNullOrWhiteSpace(channelId))
+            return $"{safeApp}:{SanitizeIdentity(channelId, "ch")}";
+        if (channelIndex is int idx)
+            return $"{safeApp}:ch-{idx}";
+        return null;
+    }
+
+    private static string ResolveDeviceHint(
+        IntercomIdentity parsed,
+        string? address,
+        string? endpointUuid,
+        string? endpointName)
+    {
+        if (!string.IsNullOrWhiteSpace(parsed.DeviceId))
+            return parsed.DeviceId;
+
+        var safeAddress = string.IsNullOrWhiteSpace(address) ? "unknown" : address;
+        var hasAppIdentity = !string.Equals(parsed.ApplicationId, "unknown", StringComparison.OrdinalIgnoreCase);
+        var hasChannelIdentity = !string.IsNullOrWhiteSpace(parsed.ChannelId) || parsed.ChannelIndex is not null;
+
+        // Avoid accidental aggregation when identity is unknown and there is no channel/device hint.
+        // In this case each endpoint should be its own device, even if it shares host/IP with others.
+        if (!hasAppIdentity && !hasChannelIdentity)
+        {
+            if (!string.IsNullOrWhiteSpace(endpointUuid))
+                return endpointUuid;
+            if (!string.IsNullOrWhiteSpace(endpointName))
+                return SanitizeIdentity(endpointName, "endpoint");
+        }
+
+        // For structured identities (app/ch), keep address fallback so channels can aggregate.
+        return safeAddress;
+    }
+
+    private static void UpdateDeviceTechnicalSummaries(NDIMultiDevice device)
+    {
+        var channels = device.Channels;
+        if (channels.Count == 0)
+            return;
+
+        device.VideoSummary = BuildDistinctSummary(channels
+            .Select(c => c.VideoCodec)
+            .Where(v => !string.IsNullOrWhiteSpace(v)));
+
+        device.AudioSummary = BuildDistinctSummary(channels
+            .Select(c =>
+            {
+                if (string.IsNullOrWhiteSpace(c.AudioCodec) && c.AudioChannels <= 0 && c.AudioSampleRate <= 0)
+                    return string.Empty;
+
+                var codec = string.IsNullOrWhiteSpace(c.AudioCodec) ? "audio" : c.AudioCodec;
+                var channelsPart = c.AudioChannels > 0 ? $"{c.AudioChannels}ch" : "?ch";
+                var sampleRatePart = c.AudioSampleRate > 0 ? $"{c.AudioSampleRate}Hz" : "?Hz";
+                return $"{codec} {channelsPart}/{sampleRatePart}";
+            })
+            .Where(v => !string.IsNullOrWhiteSpace(v)));
+
+        device.ResolutionSummary = BuildDistinctSummary(channels
+            .Where(c => c.Width > 0 && c.Height > 0)
+            .Select(c => $"{c.Width}x{c.Height}"));
+
+        device.FrameRateSummary = BuildDistinctSummary(channels
+            .Where(c => c.FrameRateN > 0 && c.FrameRateD > 0)
+            .Select(c => $"{c.FrameRate:0.00} fps"));
+
+        var ports = channels
+            .Where(c => c.Port > 0)
+            .Select(c => c.Port)
+            .Distinct()
+            .OrderBy(p => p)
+            .ToList();
+
+        device.PortSummary = ports.Count switch
+        {
+            0 => "-",
+            1 => ports[0].ToString(),
+            _ => $"{ports.First()}-{ports.Last()} ({ports.Count})"
+        };
+    }
+
+    private static string BuildDistinctSummary(IEnumerable<string> values)
+    {
+        var list = values
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (list.Count == 0)
+            return "-";
+        if (list.Count == 1)
+            return list[0];
+
+        var preview = string.Join(", ", list.Take(2));
+        return list.Count > 2 ? $"mixed ({preview}, ...)" : $"mixed ({preview})";
+    }
+
+    private static bool IsChannelStreaming(
+        bool videoPresent,
+        bool audioPresent,
+        string? videoCodec,
+        int width,
+        int height,
+        string? audioCodec,
+        int audioChannels)
+    {
+        if (videoPresent || audioPresent)
+            return true;
+
+        if (!string.IsNullOrWhiteSpace(videoCodec))
+            return true;
+
+        if (width > 0 && height > 0)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(audioCodec) && audioChannels > 0;
+    }
+
+    private readonly record struct IntercomIdentity(
+        string ApplicationId,
+        string? DeviceId,
+        string? ChannelId,
+        int? ChannelIndex);
 
     public bool ConnectReceiver(string receiverUuid, string sourceName)
     {
@@ -471,6 +1016,24 @@ public class NDIDiscoveryService : BackgroundService
             _logger.LogError(ex, $"Error sending DISCONNECT command to receiver {receiverUuid}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// NDI Discovery Server host:port (e.g. 192.168.1.10:5959). Empty = SDK default (null p_url_address).
+    /// Env <c>NDI_DISCOVERY_SERVER</c> or configuration <c>Ndi:DiscoveryServer</c> / <c>Ndi__DiscoveryServer</c>.
+    /// </summary>
+    private static string? ResolveDiscoveryServerUrl(IConfiguration configuration)
+    {
+        var env = Environment.GetEnvironmentVariable("NDI_DISCOVERY_SERVER");
+        if (!string.IsNullOrWhiteSpace(env))
+            return env.Trim();
+
+        var cfg = configuration["Ndi:DiscoveryServer"]
+                  ?? configuration["NdiDiscoveryServer"];
+        if (!string.IsNullOrWhiteSpace(cfg))
+            return cfg.Trim();
+
+        return null;
     }
 
     public override void Dispose()

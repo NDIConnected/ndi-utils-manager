@@ -1,5 +1,63 @@
 # NDI Manager 6.3 - Changelog
 
+## [Version 2.6] - 2026-03-25
+
+### NDI Discovery / Sender monitoring (§18)
+
+- **Send Listener** aligned with NDI Advanced SDK: `NDIlib_initialize` before listener create; optional Discovery Server URL via `p_url_address` (UTF-8), environment variable `NDI_DISCOVERY_SERVER` or configuration `Ndi:DiscoveryServer`.
+- **Event subscription** uses sender/receiver **UUID** consistently (tracked subscriptions, `free_events` whenever the pointer is non-null).
+- **Tally** (`tally-on-program` / `tally-on-preview`): values parsed as SDK string `"true"` / `"false"`; discovery loop applies `get_events` in the same poll as `get_senders` / `get_receivers`.
+- **Recv Listener** uses the same Discovery URL and UTF-8 string handling for parity.
+- Diagnostic **Information** logs for listener connect, sender/receiver lists, subscriptions, and events (filter `NDIManager`).
+
+### Web UI
+
+- **Aggregated sender nodes** show PGM/PVW tally (device summary and per-output chips); fixes tally hidden when `isAggregated` is true.
+
+### Desktop / installer
+
+- Application version **2.6.0**; installer **2.6** (`NDIManager-v2.6-Setup.exe`).
+
+---
+
+## [Version 2.5] - 2026-02-26
+
+### 🚀 Added - Filtering, Connection UX, Packaging Refresh
+
+#### UI Filtering (Sender/Receiver)
+- Added dedicated **Sender filter** and **Receiver filter** textboxes in the header.
+- Implemented advanced query syntax:
+  - `,` = AND groups
+  - `|` = OR terms
+  - wildcard support: `*` (any chars), `?` (single char)
+- Filtering matches app ID, address, stream labels, endpoint names, and codec summaries.
+- Connections are filtered consistently with visible sender/receiver nodes.
+
+#### Connection Interaction Improvements
+- Added drag-to-disconnect behavior: dragging an edge endpoint to empty space disconnects the receiver.
+- Added reconnect behavior: dragging to another valid connector reconnects via API.
+- Improved delete interaction: edge delete button stays fixed and centered on the selected connection.
+- Improved edge alignment with channel handles for multichannel nodes.
+
+#### Streaming-Centric Status
+- Aggregated nodes now show **Streaming X/Y** as primary activity metric.
+- Removed aggregated **Connected** count from the UI to avoid ambiguity with logical (idle) links.
+
+#### Visual & Layout Updates
+- Refined multichannel node spacing and connection rendering for better readability.
+- Kept support for multi-lane edge rendering while reducing visual clutter.
+
+#### Desktop/Installer Updates
+- Application version updated to **2.5.0**.
+- Installer version updated to **2.5**.
+- Configured `MAN_icon.ico` as:
+  - application executable icon
+  - installer icon
+  - tray/taskbar icon (with safe runtime fallback)
+- Built new installer: `Output/NDIManager-v2.5-Setup.exe`.
+
+---
+
 ## [Version 1.1] - 2025-11-25
 
 ### 🎨 Added - Mixed Connection States (Purple Indicator)

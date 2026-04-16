@@ -1,5 +1,8 @@
 # NDI 6 Event System Implementation Guide
 
+> **Update (v2.5 / Feb 2026):** This guide remains valid for the RecvListener/SendListener event model.  
+> The current NDI Manager implementation polls discovery/events at **1 second** intervals and uses these events to compute both logical link state and effective `Streaming` activity.
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [System Architecture](#system-architecture)
@@ -568,6 +571,6 @@ With this implementation, you'll have a complete NDI monitoring system that show
 
 ---
 
-**Version:** 2.0
+**Version:** 2.5
 **Date:** February 2026
 **Author:** NDI Manager Development Team

@@ -1,8 +1,8 @@
 ; NDI Manager Installer Script for Inno Setup
-; Version 2.0 - Standalone Application (System Tray)
+; Version 2.6 - Standalone Application (System Tray)
 
 #define MyAppName "NDI Manager"
-#define MyAppVersion "2.1"
+#define MyAppVersion "2.6"
 #define MyAppPublisher "Vizrt NDI AB"
 #define MyAppExeName "NDIManager.exe"
 
@@ -25,7 +25,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
-SetupIconFile=
+SetupIconFile=MAN_icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

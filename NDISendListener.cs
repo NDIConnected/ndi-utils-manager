@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using NDIManager.Models;
 
 namespace NDIManager;
@@ -14,20 +16,22 @@ public class NDISenderEvent
 }
 
 /// <summary>
-/// Helper class for monitoring NDI senders registered in the Discovery Service (NDI 6 SDK)
+/// Send Listener API (NDI Discovery Server — sender monitoring, §18).
+/// Not the same as NDIlib_find source enumeration.
 /// </summary>
 public class NDISendListener : IDisposable
 {
+    private readonly ILogger<NDISendListener> _logger;
     private IntPtr _listenerInstance = IntPtr.Zero;
+    private IntPtr _discoveryUrlAlloc = IntPtr.Zero;
+    private readonly object _subscriptionLock = new();
+    private readonly HashSet<string> _subscribedSenderUuids = new(StringComparer.Ordinal);
 
-    public NDISendListener()
+    public NDISendListener(ILogger<NDISendListener> logger)
     {
-        Initialize();
+        _logger = logger;
     }
 
-    /// <summary>
-    /// Gets whether the listener is connected to the Discovery Server
-    /// </summary>
     public bool IsConnected
     {
         get
@@ -38,9 +42,6 @@ public class NDISendListener : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the URL of the Discovery Server
-    /// </summary>
     public string? ServerUrl
     {
         get
@@ -50,36 +51,56 @@ public class NDISendListener : IDisposable
             IntPtr urlPtr = NDI.NDIlib_send_listener_get_server_url(_listenerInstance);
             if (urlPtr == IntPtr.Zero)
                 return null;
-            return Marshal.PtrToStringAnsi(urlPtr);
+            return NdiStringUtil.PtrToUtf8String(urlPtr);
         }
     }
 
     /// <summary>
-    /// Initialize the SendListener
+    /// Call only after <c>NDIlib_initialize()</c>. <paramref name="discoveryServerUrl"/> is e.g. <c>192.168.1.10:5959</c> or null for SDK default.
     /// </summary>
-    /// <param name="discoveryServerUrl">URL of the Discovery Server (null = default)</param>
-    /// <returns>True if successfully initialized</returns>
     public bool Initialize(string? discoveryServerUrl = null)
     {
+        TeardownListener();
+
+        if (!string.IsNullOrWhiteSpace(discoveryServerUrl))
+            _discoveryUrlAlloc = NdiStringUtil.AllocUtf8NullTerminated(discoveryServerUrl);
+
         var listenerSettings = new NDI.send_listener_create_t
         {
-            p_url_address = IntPtr.Zero
+            p_url_address = _discoveryUrlAlloc
         };
 
         _listenerInstance = NDI.NDIlib_send_listener_create(ref listenerSettings);
 
+        lock (_subscriptionLock)
+            _subscribedSenderUuids.Clear();
+
         if (_listenerInstance == IntPtr.Zero)
         {
+            _logger.LogWarning(
+                "[NDI SendListener] NDIlib_send_listener_create failed (url_param={Url})",
+                discoveryServerUrl ?? "(SDK default)");
+            FreeDiscoveryUrlAlloc();
             return false;
         }
+
+        _logger.LogInformation(
+            "[NDI SendListener] created: url_param={UrlParam}, connected={Connected}, server_url={ServerUrl}",
+            discoveryServerUrl ?? "(SDK default)",
+            IsConnected,
+            ServerUrl ?? "NULL");
 
         return true;
     }
 
-    /// <summary>
-    /// Get the current list of registered senders
-    /// </summary>
-    /// <returns>List of sender information</returns>
+    /// <summary>Poll-friendly: returns immediately if nothing pending.</summary>
+    public bool WaitForSenders(uint timeoutMs = 0)
+    {
+        if (_listenerInstance == IntPtr.Zero)
+            return false;
+        return NDI.NDIlib_send_listener_wait_for_senders(_listenerInstance, timeoutMs);
+    }
+
     public List<NDISenderInfo> GetSenders()
     {
         var senderList = new List<NDISenderInfo>();
@@ -91,35 +112,25 @@ public class NDISendListener : IDisposable
         IntPtr sendersPtr = NDI.NDIlib_send_listener_get_senders(_listenerInstance, ref numSenders);
 
         if (sendersPtr == IntPtr.Zero || numSenders == 0)
+        {
+            _logger.LogDebug("[NDI SendListener] get_senders: count=0");
             return senderList;
+        }
 
         int structSize = Marshal.SizeOf<NDI.sender_t>();
+        var namesForLog = new List<string>();
 
         for (int i = 0; i < numSenders; i++)
         {
             IntPtr currentPtr = IntPtr.Add(sendersPtr, i * structSize);
             var sender = Marshal.PtrToStructure<NDI.sender_t>(currentPtr);
 
-            string uuid = sender.p_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_uuid) ?? "" : "";
-            string name = sender.p_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_name) ?? "" : "";
-            string metadata = sender.p_metadata != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_metadata) ?? "" : "";
-            string address = sender.p_address != IntPtr.Zero ? Marshal.PtrToStringAnsi(sender.p_address) ?? "" : "";
+            string uuid = NdiStringUtil.PtrToUtf8String(sender.p_uuid);
+            string name = NdiStringUtil.PtrToUtf8String(sender.p_name);
+            string metadata = NdiStringUtil.PtrToUtf8String(sender.p_metadata);
+            string address = NdiStringUtil.PtrToUtf8String(sender.p_address);
 
-            // Parse groups: p_groups is an array of char* pointers
-            var groups = new List<string>();
-            if (sender.p_groups != IntPtr.Zero && sender.num_groups > 0)
-            {
-                for (uint g = 0; g < sender.num_groups; g++)
-                {
-                    IntPtr groupPtr = Marshal.ReadIntPtr(sender.p_groups, (int)(g * (uint)IntPtr.Size));
-                    if (groupPtr != IntPtr.Zero)
-                    {
-                        string groupName = Marshal.PtrToStringAnsi(groupPtr) ?? "";
-                        if (!string.IsNullOrEmpty(groupName))
-                            groups.Add(groupName);
-                    }
-                }
-            }
+            namesForLog.Add(string.IsNullOrEmpty(name) ? $"(unnamed uuid={uuid})" : name);
 
             var senderInfo = new NDISenderInfo
             {
@@ -129,63 +140,56 @@ public class NDISendListener : IDisposable
                 Address = address,
                 Port = sender.port,
                 SourceMetadata = metadata,
-                Groups = groups,
                 LastSeen = DateTime.Now
             };
 
             senderList.Add(senderInfo);
 
-            if (!sender.events_subscribed && !string.IsNullOrEmpty(uuid))
-            {
-                SubscribeEvents(uuid);
-            }
+            EnsureSubscribedToSenderEvents(uuid);
         }
+
+        _logger.LogInformation(
+            "[NDI SendListener] get_senders: count={Count}, p_name[]=[{Names}]",
+            numSenders,
+            string.Join(" | ", namesForLog));
 
         return senderList;
     }
 
-    /// <summary>
-    /// Wait for changes in the sender list
-    /// </summary>
-    /// <param name="timeoutMs">Timeout in milliseconds</param>
-    /// <returns>True if changes detected within timeout</returns>
-    public bool WaitForChanges(uint timeoutMs = 5000)
+    private void EnsureSubscribedToSenderEvents(string uuid)
     {
-        if (_listenerInstance == IntPtr.Zero)
-            return false;
-
-        return NDI.NDIlib_send_listener_wait_for_senders(_listenerInstance, timeoutMs);
-    }
-
-    /// <summary>
-    /// Subscribe to events from a specific sender
-    /// </summary>
-    /// <param name="senderUuid">UUID of the sender to subscribe to</param>
-    public void SubscribeEvents(string senderUuid)
-    {
-        if (_listenerInstance == IntPtr.Zero || string.IsNullOrEmpty(senderUuid))
+        if (_listenerInstance == IntPtr.Zero || string.IsNullOrEmpty(uuid))
             return;
 
-        NDI.NDIlib_send_listener_subscribe_events(_listenerInstance, senderUuid);
+        lock (_subscriptionLock)
+        {
+            if (_subscribedSenderUuids.Contains(uuid))
+                return;
+
+            NDI.NDIlib_send_listener_subscribe_events(_listenerInstance, uuid);
+            _subscribedSenderUuids.Add(uuid);
+            _logger.LogInformation("[NDI SendListener] subscribe_events: sender_uuid={Uuid}", uuid);
+        }
     }
 
-    /// <summary>
-    /// Unsubscribe from events from a specific sender
-    /// </summary>
-    /// <param name="senderUuid">UUID of the sender to unsubscribe from</param>
+    public void SubscribeEvents(string senderUuid) => EnsureSubscribedToSenderEvents(senderUuid);
+
     public void UnsubscribeEvents(string senderUuid)
     {
         if (_listenerInstance == IntPtr.Zero || string.IsNullOrEmpty(senderUuid))
             return;
 
-        NDI.NDIlib_send_listener_unsubscribe_events(_listenerInstance, senderUuid);
+        lock (_subscriptionLock)
+        {
+            if (!_subscribedSenderUuids.Contains(senderUuid))
+                return;
+
+            NDI.NDIlib_send_listener_unsubscribe_events(_listenerInstance, senderUuid);
+            _subscribedSenderUuids.Remove(senderUuid);
+            _logger.LogInformation("[NDI SendListener] unsubscribe_events: sender_uuid={Uuid}", senderUuid);
+        }
     }
 
-    /// <summary>
-    /// Get pending events from subscribed senders
-    /// </summary>
-    /// <param name="timeoutMs">Timeout in milliseconds (0 = don't wait)</param>
-    /// <returns>List of sender events</returns>
     public List<NDISenderEvent> GetEvents(uint timeoutMs = 0)
     {
         var eventList = new List<NDISenderEvent>();
@@ -196,11 +200,14 @@ public class NDISendListener : IDisposable
         uint numEvents = 0;
         IntPtr eventsPtr = NDI.NDIlib_send_listener_get_events(_listenerInstance, ref numEvents, timeoutMs);
 
-        if (eventsPtr == IntPtr.Zero || numEvents == 0)
+        if (eventsPtr == IntPtr.Zero)
             return eventList;
 
         try
         {
+            if (numEvents == 0)
+                return eventList;
+
             int structSize = Marshal.SizeOf<NDI.listener_event>();
 
             for (int i = 0; i < numEvents; i++)
@@ -208,9 +215,15 @@ public class NDISendListener : IDisposable
                 IntPtr currentPtr = IntPtr.Add(eventsPtr, i * structSize);
                 var evt = Marshal.PtrToStructure<NDI.listener_event>(currentPtr);
 
-                string uuid = evt.p_uuid != IntPtr.Zero ? Marshal.PtrToStringAnsi(evt.p_uuid) ?? "" : "";
-                string name = evt.p_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(evt.p_name) ?? "" : "";
-                string value = evt.p_value != IntPtr.Zero ? Marshal.PtrToStringAnsi(evt.p_value) ?? "" : "";
+                string uuid = NdiStringUtil.PtrToUtf8String(evt.p_uuid);
+                string name = NdiStringUtil.PtrToUtf8String(evt.p_name);
+                string value = NdiStringUtil.PtrToUtf8String(evt.p_value);
+
+                _logger.LogInformation(
+                    "[NDI SendListener] event: sender_uuid={Uuid}, p_name={EventName}, p_value={EventValue}",
+                    uuid,
+                    name,
+                    value);
 
                 eventList.Add(new NDISenderEvent
                 {
@@ -222,21 +235,51 @@ public class NDISendListener : IDisposable
         }
         finally
         {
-            // CRITICAL: Always free the events memory
             NDI.NDIlib_send_listener_free_events(_listenerInstance, eventsPtr);
         }
 
         return eventList;
     }
 
-    public void Dispose()
+    private void TeardownListener()
     {
-        if (_listenerInstance != IntPtr.Zero)
+        if (_listenerInstance == IntPtr.Zero)
         {
-            NDI.NDIlib_send_listener_destroy(_listenerInstance);
-            _listenerInstance = IntPtr.Zero;
+            FreeDiscoveryUrlAlloc();
+            return;
         }
 
+        List<string> uuids;
+        lock (_subscriptionLock)
+        {
+            uuids = new List<string>(_subscribedSenderUuids);
+            _subscribedSenderUuids.Clear();
+        }
+
+        foreach (var uuid in uuids)
+        {
+            if (!string.IsNullOrEmpty(uuid))
+                NDI.NDIlib_send_listener_unsubscribe_events(_listenerInstance, uuid);
+        }
+
+        NDI.NDIlib_send_listener_destroy(_listenerInstance);
+        _listenerInstance = IntPtr.Zero;
+
+        FreeDiscoveryUrlAlloc();
+        _logger.LogInformation("[NDI SendListener] destroyed listener instance");
+    }
+
+    private void FreeDiscoveryUrlAlloc()
+    {
+        if (_discoveryUrlAlloc == IntPtr.Zero)
+            return;
+        Marshal.FreeHGlobal(_discoveryUrlAlloc);
+        _discoveryUrlAlloc = IntPtr.Zero;
+    }
+
+    public void Dispose()
+    {
+        TeardownListener();
         GC.SuppressFinalize(this);
     }
 }

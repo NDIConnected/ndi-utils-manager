@@ -17,12 +17,11 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'all 0.2s',
+    transition: 'background 0.2s, box-shadow 0.2s',
     boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
   },
   deleteButtonHover: {
     background: '#dc2626',
-    transform: 'translate(-50%, -50%) scale(1.1)',
   },
 };
 
@@ -40,13 +39,18 @@ export default function CustomEdge({
   data,
 }) {
   const { deleteElements } = useReactFlow();
+  const laneIndex = Number(data?.edgeLaneIndex ?? 0);
+  const laneCount = Math.max(1, Number(data?.edgeLaneCount ?? 1));
+  const laneCenter = (laneCount - 1) / 2;
+  const laneOffset = 0;
+  const mostlyHorizontal = Math.abs(targetX - sourceX) >= Math.abs(targetY - sourceY);
 
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
+    sourceX: mostlyHorizontal ? sourceX : sourceX + laneOffset,
+    sourceY: mostlyHorizontal ? sourceY + laneOffset : sourceY,
     sourcePosition,
-    targetX,
-    targetY,
+    targetX: mostlyHorizontal ? targetX : targetX + laneOffset,
+    targetY: mostlyHorizontal ? targetY + laneOffset : targetY,
     targetPosition,
   });
 
@@ -73,7 +77,6 @@ export default function CustomEdge({
             }}
             onMouseLeave={(e) => {
               e.target.style.background = '#ef4444';
-              e.target.style.transform = 'translate(-50%, -50%)';
             }}
             title="Disconnect"
           >

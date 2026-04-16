@@ -6,6 +6,8 @@ public class NDIReceiverInfo
     public string Name { get; set; } = string.Empty;
     public string HostName { get; set; } = Environment.MachineName;
     public string Address { get; set; } = string.Empty;
+    public string? InputGroupUuid { get; set; }
+    public string? InputGroupName { get; set; }
     public string? InputUuid { get; set; }
     public string? CurrentSource { get; set; }
     public bool IsConnected { get; set; }
@@ -27,11 +29,13 @@ public class NDIReceiverInfo
     public string VideoCodec { get; set; } = string.Empty;
     public string VideoFrameType { get; set; } = string.Empty;
     public bool VideoHasAlpha { get; set; }
+    public bool VideoPresent { get; set; }
 
     // Audio properties (from source)
     public string AudioCodec { get; set; } = string.Empty;
     public int AudioChannels { get; set; }
     public int AudioSampleRate { get; set; }
+    public bool AudioPresent { get; set; }
 
     // General properties
     public string SdkVersion { get; set; } = string.Empty;

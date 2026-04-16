@@ -1,9 +1,18 @@
 # NDI Manager 6.3 - Implementation Status
 ## Mixed Connection States (Purple Indicator)
 
-**Document Version:** 1.0
-**Last Updated:** 25 November 2025
+**Document Version:** 2.5
+**Last Updated:** 26 February 2026
 **Author:** Development Team
+
+> **Important (v2.5):** This document includes historical implementation notes from the 2025 mixed-connection milestone.  
+> Current production behavior has evolved and now includes:
+> - standalone tray application architecture (no Windows Service)
+> - multichannel aggregated sender/receiver model
+> - `Streaming X/Y` status as primary activity indicator in aggregated nodes
+> - advanced sender/receiver filtering (`AND`/`OR` + wildcard support)
+> - improved edge interaction (delete button, drag-to-disconnect, reconnect)
+> - installer and app branding aligned with `MAN_icon.ico`
 
 ---
 
@@ -23,6 +32,13 @@
 ## Executive Summary
 
 **NDI Manager 6.3** is a web-based application for managing NDI (Network Device Interface) senders and receivers through an intuitive visual interface. The application communicates with the **NDI Discovery Server** to monitor and control NDI devices in real-time.
+
+### Current Release Context (v2.5)
+
+- **Backend:** .NET 9, NDI SDK 6, aggregated `/api/ndi/devices` snapshot
+- **Frontend:** React Flow multichannel nodes, stream-centric status, filtering
+- **Desktop Host:** WinForms tray app hosting local ASP.NET Core server
+- **Installer:** Inno Setup output `NDIManager-v2.5-Setup.exe`
 
 ### Latest Update: Mixed Connection States
 
@@ -56,7 +72,7 @@ This enhancement allows operators to instantly identify senders serving mixed wo
 **Deployment:**
 - Self-contained .NET application
 - Inno Setup installer
-- Windows Service with automatic startup
+- Standalone tray application with optional Windows startup shortcut
 - Integrated web UI (port 5000)
 
 ### Key Features
@@ -436,7 +452,7 @@ Sender: "Test Source 1"
 #### Option 1: Run from Source
 
 ```bash
-cd C:\TEMP\MANAGER-6.3
+cd <repo-root>
 dotnet run --project NDIManager.csproj
 ```
 
@@ -445,10 +461,10 @@ Open browser: **http://localhost:5000**
 #### Option 2: Use Installer
 
 ```bash
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "C:\TEMP\MANAGER-6.3\NDIManager-Setup.iss"
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ".\NDIManager-Setup.iss"
 ```
 
-Install from: `C:\TEMP\MANAGER-6.3\Output\NDIManager-v1.0-Setup.exe`
+Install from: `Output\NDIManager-v2.5-Setup.exe`
 
 ### Verification Checklist
 

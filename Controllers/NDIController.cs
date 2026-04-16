@@ -54,6 +54,24 @@ public class NDIController : ControllerBase
     }
 
     /// <summary>
+    /// Get aggregated multichannel devices and channel-level connections
+    /// </summary>
+    [HttpGet("devices")]
+    public ActionResult<NDIAggregatedSnapshot> GetDevices()
+    {
+        try
+        {
+            var snapshot = _discoveryService.GetAggregatedSnapshot();
+            return Ok(snapshot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting aggregated devices");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Connect a receiver to a sender via Discovery Server command
     /// </summary>
     [HttpPost("connect")]

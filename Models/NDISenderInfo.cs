@@ -8,7 +8,6 @@ public class NDISenderInfo
     public string Address { get; set; } = string.Empty;
     public int Port { get; set; }
     public string SourceMetadata { get; set; } = string.Empty;
-    public List<string> Groups { get; set; } = new();
 
     // Tally
     public bool TallyOnProgram { get; set; }
@@ -23,11 +22,13 @@ public class NDISenderInfo
     public string VideoCodec { get; set; } = string.Empty;
     public string VideoFrameType { get; set; } = string.Empty;
     public bool VideoHasAlpha { get; set; }
+    public bool VideoPresent { get; set; }
 
     // Audio properties
     public string AudioCodec { get; set; } = string.Empty;
     public int AudioChannels { get; set; }
     public int AudioSampleRate { get; set; }
+    public bool AudioPresent { get; set; }
 
     // Connection properties
     public int ConnectionCount { get; set; }

@@ -27,7 +27,7 @@ public class TrayApplicationContext : ApplicationContext
 
         _trayIcon = new NotifyIcon
         {
-            Icon = CreateTrayIcon(),
+            Icon = LoadTrayIcon(),
             Text = $"NDI Manager - Port {_currentPort}",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()
@@ -107,6 +107,8 @@ public class TrayApplicationContext : ApplicationContext
             // In WinExe mode, console logging goes nowhere - keep default providers
             // for Debug output window; add file logging if needed later
             builder.Logging.SetMinimumLevel(LogLevel.Warning);
+            // Temporary: Send/Recv listener diagnostic logs (§18 monitoring)
+            builder.Logging.AddFilter("NDIManager", LogLevel.Information);
 
             _webApp = builder.Build();
 
@@ -291,7 +293,23 @@ public class TrayApplicationContext : ApplicationContext
 
     #region Icon
 
-    private static Icon CreateTrayIcon()
+    private static Icon LoadTrayIcon()
+    {
+        try
+        {
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "MAN_icon.ico");
+            if (File.Exists(iconPath))
+                return new Icon(iconPath);
+        }
+        catch
+        {
+            // Fallback to generated icon below.
+        }
+
+        return CreateFallbackTrayIcon();
+    }
+
+    private static Icon CreateFallbackTrayIcon()
     {
         var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))
