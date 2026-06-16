@@ -12,14 +12,24 @@ import axios from 'axios';
 import SenderNode from './SenderNode';
 import ReceiverNode from './ReceiverNode';
 import CustomEdge from './CustomEdge';
+import HostOverview from './HostOverview';
+import {
+  buildHostGroups,
+  filterDevicesByHost,
+  deviceHasActivity,
+  LARGE_NETWORK_DEVICE_THRESHOLD,
+  COLLAPSE_CHANNELS_THRESHOLD,
+  MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
+} from '../utils/deviceGrouping';
 
 const API_BASE = '/api/ndi';
 const HIDE_INTERNAL_CONNECTIONS = false;
-const NODE_LAYOUT_VERSION = '2';
+const NODE_LAYOUT_VERSION = '4';
 const DEFAULT_SENDER_X = 80;
 const DEFAULT_RECEIVER_X = 940;
 const DEFAULT_NODE_Y_START = 120;
 const DEFAULT_NODE_Y_GAP = 320;
+const COMPACT_NODE_Y_GAP = 110;
 
 const styles = {
   container: { width: '100vw', height: '100vh', backgroundColor: '#111827' },
@@ -68,6 +78,27 @@ const styles = {
     fontSize: '14px',
   },
   canvas: { width: '100%', height: '100%', paddingTop: '88px' },
+  body: { display: 'flex', width: '100%', height: '100%', paddingTop: '88px' },
+  flowPane: { flex: 1, minWidth: 0, height: '100%' },
+  toolbar: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
+  viewBtn: (active) => ({
+    padding: '6px 12px',
+    fontSize: '12px',
+    borderRadius: '6px',
+    border: '1px solid #4b5563',
+    backgroundColor: active ? '#2563eb' : '#111827',
+    color: '#e5e7eb',
+    cursor: 'pointer',
+  }),
+  checkLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    color: '#d1d5db',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
 };
 
 function mergeNodes(prevNodes, nextNodes) {
@@ -155,6 +186,11 @@ export default function NDIFlowEditor() {
   const [snapshot, setSnapshot] = useState({ senders: [], receivers: [], connections: [] });
   const [senderFilter, setSenderFilter] = useState('');
   const [receiverFilter, setReceiverFilter] = useState('');
+  const [viewMode, setViewMode] = useState('overview');
+  const [hostFocus, setHostFocus] = useState(null);
+  const [showActiveOnly, setShowActiveOnly] = useState(false);
+  const [expandedDeviceKeys, setExpandedDeviceKeys] = useState(() => new Set());
+  const viewModeInitialized = useRef(false);
   const edgeReconnectSuccessful = useRef(true);
   const mutationBlockUntilRef = useRef(0);
   const suppressedReceiverUntilRef = useRef(new Map());
@@ -175,6 +211,29 @@ export default function NDIFlowEditor() {
 
   const nodeTypes = useMemo(() => ({ senderNode: SenderNode, receiverNode: ReceiverNode }), []);
   const edgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
+
+  const hostGroups = useMemo(
+    () => buildHostGroups(snapshot),
+    [snapshot],
+  );
+
+  const toggleDeviceExpanded = useCallback((nodeId) => {
+    setExpandedDeviceKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (viewModeInitialized.current || loading) return;
+    const deviceCount = snapshot.senders.length + snapshot.receivers.length;
+    if (deviceCount > LARGE_NETWORK_DEVICE_THRESHOLD) {
+      setViewMode('overview');
+    }
+    viewModeInitialized.current = true;
+  }, [loading, snapshot.senders.length, snapshot.receivers.length]);
 
   const fetchDevices = useCallback(async (force = false) => {
     if (!force && Date.now() < mutationBlockUntilRef.current) {
@@ -354,23 +413,64 @@ export default function NDIFlowEditor() {
   }, [disconnectEdgeByReceiver]);
 
   useEffect(() => {
-    const filteredSenders = snapshot.senders.filter((device) =>
+    let filteredSenders = snapshot.senders.filter((device) =>
       matchesFilterQuery(buildDeviceSearchText(device), senderFilter));
-    const filteredReceivers = snapshot.receivers.filter((device) =>
+    let filteredReceivers = snapshot.receivers.filter((device) =>
       matchesFilterQuery(buildDeviceSearchText(device), receiverFilter));
+
+    filteredSenders = filterDevicesByHost(filteredSenders, hostFocus);
+    filteredReceivers = filterDevicesByHost(filteredReceivers, hostFocus);
+
+    if (showActiveOnly) {
+      filteredSenders = filteredSenders.filter(deviceHasActivity);
+      filteredReceivers = filteredReceivers.filter(deviceHasActivity);
+    }
+
+    const connectedByDeviceKey = new Map();
+    snapshot.connections.forEach((conn) => {
+      const add = (deviceKey, channelId) => {
+        if (!deviceKey || !channelId) return;
+        if (!connectedByDeviceKey.has(deviceKey)) {
+          connectedByDeviceKey.set(deviceKey, new Set());
+        }
+        connectedByDeviceKey.get(deviceKey).add(channelId);
+      };
+      add(conn.senderDeviceKey, conn.senderChannelId);
+      add(conn.receiverDeviceKey, conn.receiverChannelId);
+    });
+
+    const nodeGap =
+      filteredSenders.length + filteredReceivers.length > LARGE_NETWORK_DEVICE_THRESHOLD
+        ? COMPACT_NODE_Y_GAP
+        : DEFAULT_NODE_Y_GAP;
+
+    const buildNodeData = (device, rolePrefix) => {
+      const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
+      const channelCount = device.channels?.length || 0;
+      const isCollapsed =
+        channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
+      return {
+        ...device,
+        isAggregated: true,
+        isCollapsed,
+        maxVisibleHandles: MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
+        connectedChannelIds: connectedByDeviceKey.get(device.deviceKey) || new Set(),
+        onToggleExpand: () => toggleDeviceExpanded(nodeId),
+      };
+    };
 
     const senderNodes = filteredSenders.map((device, index) => ({
       id: `sender-device-${device.deviceKey}`,
       type: 'senderNode',
-      position: nodePositions[`sender-device-${device.deviceKey}`] || { x: DEFAULT_SENDER_X, y: DEFAULT_NODE_Y_START + (index * DEFAULT_NODE_Y_GAP) },
-      data: { ...device, isAggregated: true },
+      position: nodePositions[`sender-device-${device.deviceKey}`] || { x: DEFAULT_SENDER_X, y: DEFAULT_NODE_Y_START + (index * nodeGap) },
+      data: buildNodeData(device, 'sender'),
     }));
 
     const receiverNodes = filteredReceivers.map((device, index) => ({
       id: `receiver-device-${device.deviceKey}`,
       type: 'receiverNode',
-      position: nodePositions[`receiver-device-${device.deviceKey}`] || { x: DEFAULT_RECEIVER_X, y: DEFAULT_NODE_Y_START + (index * DEFAULT_NODE_Y_GAP) },
-      data: { ...device, isAggregated: true },
+      position: nodePositions[`receiver-device-${device.deviceKey}`] || { x: DEFAULT_RECEIVER_X, y: DEFAULT_NODE_Y_START + (index * nodeGap) },
+      data: buildNodeData(device, 'receiver'),
     }));
 
     const nextNodes = [...senderNodes, ...receiverNodes];
@@ -435,7 +535,20 @@ export default function NDIFlowEditor() {
     setNodes((prev) => mergeNodes(prev, nextNodes));
     setEdges((prev) => mergeEdges(prev, nextEdges));
     if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
-  }, [snapshot, nodePositions, setNodes, setEdges, isFirstLoad, isReceiverConnectionSuppressed, senderFilter, receiverFilter]);
+  }, [
+    snapshot,
+    nodePositions,
+    setNodes,
+    setEdges,
+    isFirstLoad,
+    isReceiverConnectionSuppressed,
+    senderFilter,
+    receiverFilter,
+    hostFocus,
+    showActiveOnly,
+    expandedDeviceKeys,
+    toggleDeviceExpanded,
+  ]);
 
   useEffect(() => {
     fetchDevices(true);
@@ -460,9 +573,35 @@ export default function NDIFlowEditor() {
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>NDI Manager</h1>
-          <p style={styles.subtitle}>Multichannel aggregated view</p>
+          <p style={styles.subtitle}>
+            {hostFocus ? `Host: ${hostFocus}` : 'Raggruppa per macchina — apri Hosts per VECTAR-PLUS ecc.'}
+          </p>
         </div>
         <div style={styles.headerRight}>
+          <div style={styles.toolbar}>
+            <button
+              type="button"
+              style={styles.viewBtn(viewMode === 'overview')}
+              onClick={() => setViewMode('overview')}
+            >
+              Hosts
+            </button>
+            <button
+              type="button"
+              style={styles.viewBtn(viewMode === 'flow')}
+              onClick={() => setViewMode('flow')}
+            >
+              Canvas
+            </button>
+            <label style={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={showActiveOnly}
+                onChange={(e) => setShowActiveOnly(e.target.checked)}
+              />
+              Solo attivi
+            </label>
+          </div>
           <div style={styles.filtersRow}>
             <input
               type="text"
@@ -480,9 +619,11 @@ export default function NDIFlowEditor() {
             />
           </div>
           <div style={styles.stats}>
-            <span style={{ ...styles.statHighlight, ...styles.senderCount }}>{snapshot.senders.length}</span> Sender Devices
+            <span style={{ ...styles.statHighlight, ...styles.senderCount }}>{snapshot.senders.length}</span> snd
             <span style={{ margin: '0 8px' }}>•</span>
-            <span style={{ ...styles.statHighlight, ...styles.receiverCount }}>{snapshot.receivers.length}</span> Receiver Devices
+            <span style={{ ...styles.statHighlight, ...styles.receiverCount }}>{snapshot.receivers.length}</span> rcv
+            <span style={{ margin: '0 8px' }}>•</span>
+            <span>{hostGroups.length}</span> host
           </div>
           <button onClick={() => fetchDevices(true)} style={styles.refreshButton}>
             <span>🔄</span>
@@ -491,32 +632,48 @@ export default function NDIFlowEditor() {
         </div>
       </div>
 
-      <div style={styles.canvas}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onReconnectStart={onReconnectStart}
-          onReconnect={onReconnect}
-          onReconnectEnd={onReconnectEnd}
-          onEdgesDelete={onEdgesDelete}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView={isFirstLoad}
-          attributionPosition="bottom-right"
-        >
-          <Background color="#374151" gap={16} />
-          <Controls />
-          <MiniMap
-            nodeColor={(node) => {
-              if (node.type === 'senderNode') return '#10b981';
-              if (node.type === 'receiverNode') return '#3b82f6';
-              return '#6b7280';
+      <div style={styles.body}>
+        {(viewMode === 'overview' ||
+          snapshot.senders.length + snapshot.receivers.length > LARGE_NETWORK_DEVICE_THRESHOLD) && (
+          <HostOverview
+            hostGroups={hostGroups}
+            selectedHostKey={hostFocus}
+            onSelectHost={(key) => {
+              setHostFocus(key);
             }}
+            totalSenders={snapshot.senders.length}
+            totalReceivers={snapshot.receivers.length}
           />
-        </ReactFlow>
+        )}
+        <div style={styles.flowPane}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onReconnectStart={onReconnectStart}
+            onReconnect={onReconnect}
+            onReconnectEnd={onReconnectEnd}
+            onEdgesDelete={onEdgesDelete}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView={isFirstLoad}
+            minZoom={0.05}
+            maxZoom={1.5}
+            attributionPosition="bottom-right"
+          >
+            <Background color="#374151" gap={16} />
+            <Controls />
+            <MiniMap
+              nodeColor={(node) => {
+                if (node.type === 'senderNode') return '#10b981';
+                if (node.type === 'receiverNode') return '#3b82f6';
+                return '#6b7280';
+              }}
+            />
+          </ReactFlow>
+        </div>
       </div>
     </div>
   );

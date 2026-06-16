@@ -14,6 +14,8 @@ public class NDIMultiDevice
     public string Role { get; set; } = string.Empty; // sender | receiver
     public string DisplayName { get; set; } = string.Empty;
     public string ApplicationId { get; set; } = "unknown";
+    /// <summary>Machine / PC prefix from NDI stream name (e.g. VECTAR-PLUS).</summary>
+    public string HostName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Address { get; set; } = string.Empty;
     public string VideoSummary { get; set; } = "-";

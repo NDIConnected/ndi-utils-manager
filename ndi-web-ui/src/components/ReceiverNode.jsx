@@ -1,4 +1,5 @@
 import { Handle, Position } from '@xyflow/react';
+import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 
 const styles = {
   node: (isConnected) => ({
@@ -160,10 +161,31 @@ export default function ReceiverNode({ data }) {
 
   if (data?.isAggregated) {
     const channels = Array.isArray(data.channels) ? data.channels : [];
+    const isCollapsed = data?.isCollapsed === true;
+    const connectedChannelIds = data?.connectedChannelIds instanceof Set
+      ? data.connectedChannelIds
+      : new Set(data?.connectedChannelIds || []);
+
+    const pickVisibleChannels = () => {
+      if (!isCollapsed) return channels;
+      const prioritized = channels.filter(
+        (c) => c.isStreaming || c.isConnected || connectedChannelIds.has(c.channelId),
+      );
+      const pool = prioritized.length > 0 ? prioritized : channels;
+      const limit = data?.maxVisibleHandles ?? 4;
+      return pool.slice(0, limit);
+    };
+
+    const visibleChannels = pickVisibleChannels();
+    const hiddenChannelCount = Math.max(0, channels.length - visibleChannels.length);
+
     const streamingChannels = channels.filter(c => c.isStreaming);
-    const channelsStartTop = 242;
+    const channelsStartTop = isCollapsed ? 168 : 242;
     const channelRowHeight = 24;
-    const nodeMinHeight = Math.max(290, channelsStartTop + (channels.length * channelRowHeight) + 14);
+    const expandButtonHeight = isCollapsed && hiddenChannelCount > 0 ? 40 : 0;
+    const nodeMinHeight = isCollapsed
+      ? channelsStartTop + (visibleChannels.length * channelRowHeight) + expandButtonHeight + 20
+      : Math.max(290, channelsStartTop + (channels.length * channelRowHeight) + 14);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
     const appDisplayName = data.applicationId !== 'unknown'
@@ -173,36 +195,6 @@ export default function ReceiverNode({ data }) {
 
     return (
       <div style={{ ...styles.node(streamingChannels.length > 0), minHeight: `${nodeMinHeight}px` }}>
-        {channels.map((channel, idx) => (
-          <Handle
-            key={`in-${channel.channelId}-${idx}`}
-            id={`in-${channel.channelId}`}
-            type="target"
-            position={Position.Left}
-            style={{
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-              width: '12px',
-              height: '12px',
-              backgroundColor: '#3b82f6',
-              border: '2px solid #93c5fd',
-            }}
-            title={getConnectionLabel(channel, idx)}
-          />
-        ))}
-
-        {channels.map((channel, idx) => (
-          <div
-            key={`in-label-${channel.channelId}-${idx}`}
-            style={{
-              ...styles.channelLabel,
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-            }}
-            title={getConnectionLabel(channel, idx)}
-          >
-            {getConnectionLabel(channel, idx)}
-          </div>
-        ))}
-
         <div style={styles.header}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(streamingChannels.length > 0)} />
@@ -226,23 +218,103 @@ export default function ReceiverNode({ data }) {
             <span style={styles.label}>Streaming:</span>
             <span style={styles.value}>{`${streamingChannels.length}/${channels.length}`}</span>
           </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Video:</span>
-            <span style={styles.value}>{data.videoSummary || '-'}</span>
-          </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Audio:</span>
-            <span style={styles.value}>{data.audioSummary || '-'}</span>
-          </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Res/FPS:</span>
-            <span style={styles.value}>{`${data.resolutionSummary || '-'} / ${data.frameRateSummary || '-'}`}</span>
-          </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Ports:</span>
-            <span style={styles.value}>{data.portSummary || '-'}</span>
-          </div>
+          {!isCollapsed && (
+            <>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>Video:</span>
+                <span style={styles.value}>{data.videoSummary || '-'}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>Audio:</span>
+                <span style={styles.value}>{data.audioSummary || '-'}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>Res/FPS:</span>
+                <span style={styles.value}>{`${data.resolutionSummary || '-'} / ${data.frameRateSummary || '-'}`}</span>
+              </div>
+              <div style={styles.infoRow}>
+                <span style={styles.label}>Ports:</span>
+                <span style={styles.value}>{data.portSummary || '-'}</span>
+              </div>
+            </>
+          )}
         </div>
+
+        {isCollapsed && hiddenChannelCount > 0 && (
+          <button
+            type="button"
+            className="nodrag nopan"
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); data?.onToggleExpand?.(); }}
+            style={{
+              position: 'relative',
+              zIndex: 20,
+              marginTop: '8px',
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '11px',
+              borderRadius: '6px',
+              border: '1px solid #4b5563',
+              backgroundColor: '#111827',
+              color: '#93c5fd',
+              cursor: 'pointer',
+            }}
+          >
+            +{hiddenChannelCount} canali — espandi
+          </button>
+        )}
+
+        {!isCollapsed && channels.length > COLLAPSE_CHANNELS_THRESHOLD && (
+          <button
+            type="button"
+            className="nodrag nopan"
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); data?.onToggleExpand?.(); }}
+            style={{
+              position: 'relative',
+              zIndex: 20,
+              marginTop: '8px',
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: '11px',
+              borderRadius: '6px',
+              border: '1px solid #4b5563',
+              backgroundColor: '#111827',
+              color: '#93c5fd',
+              cursor: 'pointer',
+            }}
+          >
+            comprimi
+          </button>
+        )}
+
+        {visibleChannels.map((channel, idx) => (
+          <Handle
+            key={`in-${channel.channelId}-${idx}`}
+            id={`in-${channel.channelId}`}
+            type="target"
+            position={Position.Left}
+            style={{
+              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
+              width: '12px',
+              height: '12px',
+              backgroundColor: '#3b82f6',
+              border: '2px solid #93c5fd',
+            }}
+            title={getConnectionLabel(channel, idx)}
+          />
+        ))}
+
+        {visibleChannels.map((channel, idx) => (
+          <div
+            key={`in-label-${channel.channelId}-${idx}`}
+            style={{
+              ...styles.channelLabel,
+              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
+            }}
+            title={getConnectionLabel(channel, idx)}
+          >
+            {getConnectionLabel(channel, idx)}
+          </div>
+        ))}
       </div>
     );
   }

@@ -172,8 +172,9 @@ public class NDIRecvListener : IDisposable
                     InputGroupUuid = !string.IsNullOrEmpty(inputUuid) ? inputUuid : null,
                     InputGroupName = !string.IsNullOrEmpty(inputName) ? inputName : null,
                     InputUuid = !string.IsNullOrEmpty(inputUuid) ? inputUuid : null,
-                    CurrentSource = !string.IsNullOrEmpty(inputName) ? inputName : null,
-                    IsConnected = !string.IsNullOrEmpty(inputUuid),
+                    // p_input_name is often empty; source-name events populate CurrentSource in NDIDiscoveryService.
+                    CurrentSource = null,
+                    IsConnected = false,
                     Streams = streams,
                     Commands = commands,
                     LastSeen = DateTime.Now

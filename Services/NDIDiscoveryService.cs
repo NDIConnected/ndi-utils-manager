@@ -120,7 +120,6 @@ public class NDIDiscoveryService : BackgroundService
             }
 
             _senders.Clear();
-            var sendersByUuid = new Dictionary<string, NDISenderInfo>();
             foreach (var sender in senders)
             {
                 if (!string.IsNullOrEmpty(sender.Id) && _senderEventCache.TryGetValue(sender.Id, out var eventData))
@@ -219,10 +218,6 @@ public class NDIDiscoveryService : BackgroundService
                 }
 
                 _senders[sender.Name] = sender;
-                if (!string.IsNullOrEmpty(sender.Id))
-                {
-                    sendersByUuid[sender.Id] = sender;
-                }
             }
 
             _logger.LogDebug("Discovered {Count} NDI senders from Discovery Server", senders.Count);
@@ -263,14 +258,16 @@ public class NDIDiscoveryService : BackgroundService
             {
                 if (evt.EventName == "source-name")
                 {
-                    if (!string.IsNullOrEmpty(evt.EventValue))
-                        _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue;
+                    if (string.IsNullOrWhiteSpace(evt.EventValue))
+                        _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
+                    else
+                        _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue.Trim();
                 }
 
-                if (evt.EventName == "connection-state" && evt.EventValue == "disconnected")
+                if (evt.EventName == "connection-state" &&
+                    string.Equals(evt.EventValue, "disconnected", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (_receiverSourceNames.ContainsKey(evt.ReceiverUuid))
-                        _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
+                    _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
                 }
 
                 if (!string.IsNullOrEmpty(evt.ReceiverUuid))
@@ -283,22 +280,13 @@ public class NDIDiscoveryService : BackgroundService
                 }
             }
 
+            SyncReceiverSourceNamesFromEventCache();
+
             // Update receivers dictionary and correlate with sources
             _receivers.Clear();
             foreach (var receiver in receivers)
             {
-                // BEST: Use source-name from cached events (most reliable)
-                if (_receiverSourceNames.TryGetValue(receiver.Id, out var sourceNameFromEvent))
-                {
-                    receiver.CurrentSource = sourceNameFromEvent;
-                    receiver.IsConnected = true;
-                }
-                // Fallback: Try to match with senders from Discovery Server by UUID
-                else if (!string.IsNullOrEmpty(receiver.InputUuid) && sendersByUuid.TryGetValue(receiver.InputUuid, out var connectedSender))
-                {
-                    receiver.CurrentSource = connectedSender.Name;
-                    receiver.IsConnected = true;
-                }
+                ApplyReceiverConnectionFromEvents(receiver);
 
                 // Populate receiver technical properties from cached event data
                 if (!string.IsNullOrEmpty(receiver.Id) && _receiverEventCache.TryGetValue(receiver.Id, out var eventData))
@@ -447,17 +435,21 @@ public class NDIDiscoveryService : BackgroundService
                 {
                     DeviceKey = deviceKey,
                     Role = role,
-                    DisplayName = $"{parsed.ApplicationId} Sender",
+                    DisplayName = BuildDeviceDisplayName(parsed, "Sender"),
                     ApplicationId = parsed.ApplicationId,
+                    HostName = parsed.HostName != "unknown" ? parsed.HostName : string.Empty,
                     Status = sender.Status,
                     Address = sender.Address
                 };
                 senderDevices[deviceKey] = device;
             }
 
-            var channelId = !string.IsNullOrWhiteSpace(parsed.ChannelId)
-                ? parsed.ChannelId
-                : (!string.IsNullOrWhiteSpace(sender.Id) ? sender.Id : Guid.NewGuid().ToString("N"));
+            // Prefer endpoint UUID so channel ids stay unique across aggregated devices (avoids ch-1 collisions).
+            var channelId = !string.IsNullOrWhiteSpace(sender.Id)
+                ? sender.Id
+                : (!string.IsNullOrWhiteSpace(parsed.ChannelId)
+                    ? parsed.ChannelId
+                    : Guid.NewGuid().ToString("N"));
 
             var channel = new NDIMultiChannel
             {
@@ -514,7 +506,11 @@ public class NDIDiscoveryService : BackgroundService
                 senderByName.TryGetValue(receiver.CurrentSource, out var senderForSource))
             {
                 var senderParsed = ParseIntercomIdentity(senderForSource.SourceMetadata, senderForSource.Name);
-                parsed = parsed with { ApplicationId = senderParsed.ApplicationId };
+                parsed = parsed with
+                {
+                    ApplicationId = senderParsed.ApplicationId,
+                    HostName = senderParsed.HostName != "unknown" ? senderParsed.HostName : parsed.HostName
+                };
             }
 
             if (parsed.ApplicationId == "unknown" &&
@@ -534,17 +530,20 @@ public class NDIDiscoveryService : BackgroundService
                 {
                     DeviceKey = deviceKey,
                     Role = role,
-                    DisplayName = $"{parsed.ApplicationId} Receiver",
+                    DisplayName = BuildDeviceDisplayName(parsed, "Receiver"),
                     ApplicationId = parsed.ApplicationId,
+                    HostName = parsed.HostName != "unknown" ? parsed.HostName : string.Empty,
                     Status = receiver.Status,
                     Address = receiver.Address
                 };
                 receiverDevices[deviceKey] = device;
             }
 
-            var channelId = !string.IsNullOrWhiteSpace(parsed.ChannelId)
-                ? parsed.ChannelId
-                : (!string.IsNullOrWhiteSpace(receiver.Id) ? receiver.Id : Guid.NewGuid().ToString("N"));
+            var channelId = !string.IsNullOrWhiteSpace(receiver.Id)
+                ? receiver.Id
+                : (!string.IsNullOrWhiteSpace(parsed.ChannelId)
+                    ? parsed.ChannelId
+                    : Guid.NewGuid().ToString("N"));
 
             var channel = new NDIMultiChannel
             {
@@ -604,29 +603,33 @@ public class NDIDiscoveryService : BackgroundService
         InferUnknownApplicationIdsByAddress(senderDevices.Values, receiverDevices.Values, "sender");
         InferUnknownApplicationIdsByAddress(receiverDevices.Values, senderDevices.Values, "receiver");
 
+        var senderDeviceList = senderDevices.Values.ToList();
         var connections = new List<NDIMultiConnection>();
         foreach (var receiver in receivers.Where(r => r.IsConnected && !string.IsNullOrWhiteSpace(r.CurrentSource)))
         {
             if (!receiverChannelsByUuid.TryGetValue(receiver.Id, out var receiverChannel))
                 continue;
 
-            NDIMultiChannel? senderChannel = null;
-            if (!senderChannelsByName.TryGetValue(receiver.CurrentSource!, out senderChannel))
-            {
-                var sourceIdentity = ParseIntercomIdentity(string.Empty, receiver.CurrentSource);
-                var sourceKey = BuildAppChannelKey(sourceIdentity.ApplicationId, sourceIdentity.ChannelId, sourceIdentity.ChannelIndex);
-                if (string.IsNullOrWhiteSpace(sourceKey) || !senderChannelsByAppChannel.TryGetValue(sourceKey, out senderChannel))
-                    continue;
-            }
+            var senderChannel = TryFindSenderChannelForSource(
+                receiver.CurrentSource!,
+                senderChannelsByName,
+                senderChannelsByAppChannel,
+                senderDeviceList);
+            if (senderChannel == null)
+                continue;
 
-            var senderDevice = senderDevices.Values.FirstOrDefault(d => d.Channels.Any(c => c.ChannelId == senderChannel.ChannelId));
-            var receiverDevice = receiverDevices.Values.FirstOrDefault(d => d.Channels.Any(c => c.ChannelId == receiverChannel.ChannelId));
+            var senderDevice = senderDeviceList.FirstOrDefault(d =>
+                d.Channels.Any(c =>
+                    string.Equals(c.EndpointUuid, senderChannel.EndpointUuid, StringComparison.OrdinalIgnoreCase)));
+            var receiverDevice = receiverDevices.Values.FirstOrDefault(d =>
+                d.Channels.Any(c =>
+                    string.Equals(c.EndpointUuid, receiverChannel.EndpointUuid, StringComparison.OrdinalIgnoreCase)));
             if (senderDevice == null || receiverDevice == null)
                 continue;
 
             connections.Add(new NDIMultiConnection
             {
-                ConnectionId = $"{senderChannel.ChannelId}->{receiverChannel.ChannelId}",
+                ConnectionId = $"{senderChannel.EndpointUuid}->{receiverChannel.EndpointUuid}",
                 SenderDeviceKey = senderDevice.DeviceKey,
                 SenderChannelId = senderChannel.ChannelId,
                 SenderLabel = senderChannel.StreamLabel,
@@ -653,6 +656,7 @@ public class NDIDiscoveryService : BackgroundService
         string? fallbackName)
     {
         string appId = "unknown";
+        string hostName = "unknown";
         string? deviceId = null;
         string? channelId = null;
         int? channelIndex = null;
@@ -682,6 +686,10 @@ public class NDIDiscoveryService : BackgroundService
             }
         }
 
+        var streamIdentity = ParseNdiStreamName(fallbackName);
+        if (hostName == "unknown" && !string.IsNullOrWhiteSpace(streamIdentity.HostName))
+            hostName = streamIdentity.HostName;
+
         if (channelIndex == null && !string.IsNullOrWhiteSpace(fallbackName))
         {
             var match = Regex.Match(fallbackName, @"(?:CH|Channel)\s*0*(\d+)", RegexOptions.IgnoreCase);
@@ -694,6 +702,17 @@ public class NDIDiscoveryService : BackgroundService
             var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([A-Za-z0-9_.-]+)", RegexOptions.IgnoreCase);
             if (appMatch.Success)
                 appId = appMatch.Groups[1].Value;
+        }
+
+        // NDI names: "HOST (App) Output" or "HOST (Channel(App))" — app name drives grouping, host is separate.
+        if (appId == "unknown" && !string.IsNullOrWhiteSpace(streamIdentity.ApplicationName))
+            appId = streamIdentity.ApplicationName;
+
+        if (string.IsNullOrWhiteSpace(channelId) && !string.IsNullOrWhiteSpace(streamIdentity.ChannelLabel))
+        {
+            channelId = streamIdentity.ChannelLabel;
+            if (channelIndex == null && TryParseChannelIndex(streamIdentity.ChannelLabel, out var idx))
+                channelIndex = idx;
         }
 
         if (string.IsNullOrWhiteSpace(deviceId) && TryExtractNameToken(fallbackName, "device", out var tokenDevice))
@@ -720,10 +739,71 @@ public class NDIDiscoveryService : BackgroundService
             channelId = $"ch-{channelIndex.Value}";
 
         appId = SanitizeIdentity(appId, "unknown");
+        hostName = SanitizeIdentity(hostName, "unknown");
         deviceId = string.IsNullOrWhiteSpace(deviceId) ? null : SanitizeIdentity(deviceId, "device");
         channelId = string.IsNullOrWhiteSpace(channelId) ? null : SanitizeIdentity(channelId, "ch");
 
-        return new IntercomIdentity(appId, deviceId, channelId, channelIndex);
+        return new IntercomIdentity(appId, hostName, deviceId, channelId, channelIndex);
+    }
+
+    /// <summary>
+    /// Parses NDI endpoint names:
+    /// - "HOST (App) Output" → host + application
+    /// - "HOST (Channel(App))" → host + channel + nested application (multichannel intercom)
+    /// </summary>
+    private static (string HostName, string? ApplicationName, string? ChannelLabel) ParseNdiStreamName(string? endpointName)
+    {
+        var hostName = ExtractHostLabelFromEndpointName(endpointName);
+        if (string.IsNullOrWhiteSpace(endpointName))
+            return (hostName, null, null);
+
+        var raw = endpointName.Trim();
+
+        var nestedMatch = Regex.Match(raw, @"\(([^()]+)\(([^()]+)\)\)");
+        if (nestedMatch.Success)
+        {
+            var channelLabel = nestedMatch.Groups[1].Value.Trim();
+            var applicationName = nestedMatch.Groups[2].Value.Trim();
+            return (hostName, applicationName, channelLabel);
+        }
+
+        var simpleMatch = Regex.Match(raw, @"\(([^()]+)\)");
+        if (simpleMatch.Success)
+            return (hostName, simpleMatch.Groups[1].Value.Trim(), null);
+
+        return (hostName, null, null);
+    }
+
+    private static string BuildDeviceDisplayName(IntercomIdentity parsed, string roleSuffix)
+    {
+        if (!string.Equals(parsed.ApplicationId, "unknown", StringComparison.OrdinalIgnoreCase))
+            return $"{parsed.ApplicationId} {roleSuffix}";
+
+        if (!string.Equals(parsed.HostName, "unknown", StringComparison.OrdinalIgnoreCase))
+            return $"{parsed.HostName} {roleSuffix}";
+
+        return $"Unknown {roleSuffix}";
+    }
+
+    /// <summary>
+    /// Machine / host prefix before "(" or "[" in NDI endpoint names (e.g. "VECTAR-PLUS (App)").
+    /// </summary>
+    private static string ExtractHostLabelFromEndpointName(string? endpointName)
+    {
+        if (string.IsNullOrWhiteSpace(endpointName))
+            return string.Empty;
+
+        var raw = endpointName.Trim();
+        var cut = raw.IndexOfAny(['(', '[']);
+        if (cut <= 0)
+            return string.Empty;
+
+        var host = raw[..cut].Trim();
+        if (string.IsNullOrWhiteSpace(host))
+            return string.Empty;
+
+        var sanitized = SanitizeIdentity(host, string.Empty);
+        return string.Equals(sanitized, "unknown", StringComparison.OrdinalIgnoreCase) ? string.Empty : sanitized;
     }
 
     private static string SanitizeIdentity(string? value, string fallback)
@@ -863,10 +943,10 @@ public class NDIDiscoveryService : BackgroundService
 
         var safeAddress = string.IsNullOrWhiteSpace(address) ? "unknown" : address;
         var hasAppIdentity = !string.Equals(parsed.ApplicationId, "unknown", StringComparison.OrdinalIgnoreCase);
+        var hasHostIdentity = !string.Equals(parsed.HostName, "unknown", StringComparison.OrdinalIgnoreCase);
         var hasChannelIdentity = !string.IsNullOrWhiteSpace(parsed.ChannelId) || parsed.ChannelIndex is not null;
 
-        // Avoid accidental aggregation when identity is unknown and there is no channel/device hint.
-        // In this case each endpoint should be its own device, even if it shares host/IP with others.
+        // Unknown identity without channel metadata: one node per endpoint.
         if (!hasAppIdentity && !hasChannelIdentity)
         {
             if (!string.IsNullOrWhiteSpace(endpointUuid))
@@ -875,7 +955,14 @@ public class NDIDiscoveryService : BackgroundService
                 return SanitizeIdentity(endpointName, "endpoint");
         }
 
-        // For structured identities (app/ch), keep address fallback so channels can aggregate.
+        // Same application on the same host → one multichannel node (e.g. vMix outputs, intercom channels).
+        if (hasAppIdentity)
+        {
+            if (hasHostIdentity)
+                return $"{parsed.ApplicationId}@{parsed.HostName}";
+            return parsed.ApplicationId;
+        }
+
         return safeAddress;
     }
 
@@ -925,6 +1012,88 @@ public class NDIDiscoveryService : BackgroundService
         };
     }
 
+    private void SyncReceiverSourceNamesFromEventCache()
+    {
+        foreach (var (receiverUuid, eventData) in _receiverEventCache)
+        {
+            lock (eventData)
+            {
+                if (eventData.TryGetValue("source-name", out var sourceName) && !string.IsNullOrWhiteSpace(sourceName))
+                    _receiverSourceNames[receiverUuid] = sourceName.Trim();
+            }
+        }
+    }
+
+    private void ApplyReceiverConnectionFromEvents(NDIReceiverInfo receiver)
+    {
+        receiver.IsConnected = false;
+        receiver.CurrentSource = null;
+
+        if (string.IsNullOrEmpty(receiver.Id))
+            return;
+
+        if (_receiverEventCache.TryGetValue(receiver.Id, out var eventData))
+        {
+            lock (eventData)
+            {
+                if (eventData.TryGetValue("connection-state", out var connState) &&
+                    string.Equals(connState, "disconnected", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (eventData.TryGetValue("source-name", out var sourceName) && !string.IsNullOrWhiteSpace(sourceName))
+                {
+                    receiver.CurrentSource = sourceName.Trim();
+                    receiver.IsConnected = true;
+                    return;
+                }
+            }
+        }
+
+        if (_receiverSourceNames.TryGetValue(receiver.Id, out var cachedSource) && !string.IsNullOrWhiteSpace(cachedSource))
+        {
+            receiver.CurrentSource = cachedSource.Trim();
+            receiver.IsConnected = true;
+        }
+    }
+
+    private static NDIMultiChannel? TryFindSenderChannelForSource(
+        string sourceName,
+        Dictionary<string, NDIMultiChannel> senderChannelsByName,
+        Dictionary<string, NDIMultiChannel> senderChannelsByAppChannel,
+        IReadOnlyList<NDIMultiDevice> senderDevices)
+    {
+        var trimmed = sourceName.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return null;
+
+        if (senderChannelsByName.TryGetValue(trimmed, out var exact))
+            return exact;
+
+        foreach (var device in senderDevices)
+        {
+            foreach (var channel in device.Channels)
+            {
+                if (string.Equals(channel.StreamLabel, trimmed, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(channel.EndpointName, trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    return channel;
+                }
+            }
+        }
+
+        var sourceIdentity = ParseIntercomIdentity(string.Empty, trimmed);
+        var sourceKey = BuildAppChannelKey(sourceIdentity.ApplicationId, sourceIdentity.ChannelId, sourceIdentity.ChannelIndex);
+        if (!string.IsNullOrWhiteSpace(sourceKey) &&
+            senderChannelsByAppChannel.TryGetValue(sourceKey, out var byAppChannel))
+        {
+            return byAppChannel;
+        }
+
+        return null;
+    }
+
     private static string BuildDistinctSummary(IEnumerable<string> values)
     {
         var list = values
@@ -966,6 +1135,7 @@ public class NDIDiscoveryService : BackgroundService
 
     private readonly record struct IntercomIdentity(
         string ApplicationId,
+        string HostName,
         string? DeviceId,
         string? ChannelId,
         int? ChannelIndex);
@@ -978,6 +1148,15 @@ public class NDIDiscoveryService : BackgroundService
 
             if (success)
             {
+                var trimmed = sourceName.Trim();
+                _receiverSourceNames[receiverUuid] = trimmed;
+                var eventData = _receiverEventCache.GetOrAdd(receiverUuid, _ => new Dictionary<string, string>());
+                lock (eventData)
+                {
+                    eventData["source-name"] = trimmed;
+                    eventData["connection-state"] = "connected";
+                }
+
                 _logger.LogInformation($"Sent CONNECT command to receiver {receiverUuid} for source {sourceName}");
             }
             else
@@ -1002,6 +1181,16 @@ public class NDIDiscoveryService : BackgroundService
 
             if (success)
             {
+                _receiverSourceNames.TryRemove(receiverUuid, out _);
+                if (_receiverEventCache.TryGetValue(receiverUuid, out var eventData))
+                {
+                    lock (eventData)
+                    {
+                        eventData["source-name"] = string.Empty;
+                        eventData["connection-state"] = "disconnected";
+                    }
+                }
+
                 _logger.LogInformation($"Sent DISCONNECT command to receiver {receiverUuid}");
             }
             else

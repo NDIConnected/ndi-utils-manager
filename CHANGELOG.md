@@ -1,5 +1,44 @@
 # NDI Manager 6.3 - Changelog
 
+## [Version 2.8] - 2026-06-16
+
+### Device aggregation
+
+- Separate NDI applications on the same machine now appear as distinct nodes (e.g. OBS, vMix, Wirecast), instead of one merged multichannel object.
+- Multichannel apps (intercom / multi-output) still group by application name from stream names: `HOST (App)` or `HOST (Channel(App))`.
+- Added `HostName` on aggregated devices; Host sidebar groups by machine, canvas nodes by application.
+
+### UI fixes
+
+- Receiver multichannel nodes: expand/collapse button works reliably (aligned with sender layout and position).
+- Collapse button when expanded; improved compact node height for 16+ channels.
+
+### Desktop / installer
+
+- Application version **2.8.0**; installer **2.8** (`NDIManager-v2.8-Setup.exe`).
+
+---
+
+## [Version 2.7] - 2026-05-18
+
+### UI — Large network usability
+
+- Host sidebar to group devices by machine (e.g. VECTAR-PLUS) and focus the canvas on one host.
+- Compact collapsed nodes for devices with many channels; expand on demand.
+- **Solo attivi** filter; tighter layout spacing on large topologies.
+
+### Connection mapping fixes
+
+- Connections use NDI `source-name` events only (removed incorrect `InputUuid` → sender fallback).
+- Sender/receiver channels keyed by endpoint UUID to avoid wrong edges (e.g. CAMERA-02 → MN-INTERCOM).
+- Host label extracted from NDI names like `VECTAR-PLUS (App)` for better aggregation.
+
+### Desktop / installer
+
+- Application version **2.7.0**; installer **2.7** (`NDIManager-v2.7-Setup.exe`).
+
+---
+
 ## [Version 2.6] - 2026-03-25
 
 ### NDI Discovery / Sender monitoring (§18)

@@ -1,16 +1,18 @@
 # NDI Manager 6.3 - Installer Build Instructions
 
-## Version 2.6
+## Version 2.8
 
 ## Overview
 
 This document describes how to build and package the standalone desktop/tray version of NDI Manager using Inno Setup.
 
-## Key Release Notes (v2.6)
+## Key Release Notes (v2.8)
 
+- Separate canvas nodes per NDI app on the same PC; multichannel grouping by application name
+- Receiver expand/collapse aligned with sender
 - Standalone WinForms tray application (not a Windows Service)
 - Self-contained `.NET 9` publish for `win-x64`
-- Installer output: `Output\NDIManager-v2.6-Setup.exe`
+- Installer output: `Output\NDIManager-v2.8-Setup.exe`
 - Unified icon branding with `MAN_icon.ico` for:
   - installer executable
   - application executable
@@ -54,7 +56,7 @@ dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
 ```
 
 Result:
-- `Output\NDIManager-v2.6-Setup.exe`
+- `Output\NDIManager-v2.8-Setup.exe`
 
 ## Installer Behavior
 
