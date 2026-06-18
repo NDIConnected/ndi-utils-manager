@@ -1,5 +1,31 @@
 # NDI Manager 6.3 - Changelog
 
+## [Version 3.0] - 2026-06-19
+
+### Web UI
+
+- **Per-device compact view** — click the device **name** (dotted underline) to toggle compact ↔ detailed; preference saved per device in the browser.
+- **Compact cards** — minimal sender/receiver layout with address and a single stacked connector for multi-channel devices.
+- **Drag handle** — move nodes from the **header bar** only (`SENDER DEVICE` / `RECEIVER DEVICE`); avoids conflicts with channel clicks and compact toggle.
+- **Connection UX** — optimistic edges on connect; click a line immediately to select and disconnect (no wait for green confirm); NDI confirm still shown as solid green when reported.
+- **Layout** — stacked auto-layout with post-render height measurement; saved positions preserved; layout version bumped to avoid stale overlaps on first load.
+- **Canvas toolbar** — single **Show hosts / Canvas only** toggle (replaces separate hosts + canvas-only controls).
+- Removed **Events** tab and NDI events panel (unused).
+- Removed global **Compact nodes** toggle (replaced by per-device control).
+
+### Backend / desktop
+
+- Tray context menu translated to **English** (Open Web UI, Port, Restart service, Open data folder, Exit).
+- Removed Windows **balloon notifications** when a receiver loses its source.
+- **Self-contained** Release publish (`win-x64`) — installer no longer requires a separate .NET runtime on target PCs.
+- Added `scripts/publish-standalone.ps1` and fixed publish profile output path.
+
+### Desktop / installer
+
+- Application version **3.0.0**; installer **3.0** (`NDIManager-v3.0-Setup.exe`).
+
+---
+
 ## [Version 2.9] - 2026-06-16
 
 ### Web UI

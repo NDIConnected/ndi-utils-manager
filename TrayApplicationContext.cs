@@ -23,7 +23,6 @@ public class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem? _discoveryMenuItem;
 
     private NDIDiscoveryService? _discoveryService;
-    private readonly Dictionary<string, string> _lastReceiverSources = new(StringComparer.OrdinalIgnoreCase);
     private Icon? _iconGreen;
     private Icon? _iconYellow;
     private Icon? _iconRed;
@@ -39,7 +38,7 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Icon = LoadTrayIcon(),
-            Text = $"NDI Manager - Porta {_currentPort}",
+            Text = $"NDI Manager - Port {_currentPort}",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()
         };
@@ -59,7 +58,7 @@ public class TrayApplicationContext : ApplicationContext
         menu.Renderer = new ToolStripProfessionalRenderer(new DarkColorTable());
 
         // Open Web UI (bold = default action)
-        var openItem = new ToolStripMenuItem("Apri Web UI");
+        var openItem = new ToolStripMenuItem("Open Web UI");
         openItem.Font = new Font(openItem.Font, FontStyle.Bold);
         openItem.Click += (_, _) => OpenWebUI();
         menu.Items.Add(openItem);
@@ -67,7 +66,7 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         // Status
-        _statusMenuItem = new ToolStripMenuItem("Stato: avvio...")
+        _statusMenuItem = new ToolStripMenuItem("Status: starting...")
         {
             Enabled = false
         };
@@ -80,22 +79,22 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_discoveryMenuItem);
 
         // Port
-        _portMenuItem = new ToolStripMenuItem($"Porta: {_currentPort}");
+        _portMenuItem = new ToolStripMenuItem($"Port: {_currentPort}");
         _portMenuItem.Click += (_, _) => ChangePort();
         menu.Items.Add(_portMenuItem);
 
-        var restartItem = new ToolStripMenuItem("Riavvia servizio");
+        var restartItem = new ToolStripMenuItem("Restart service");
         restartItem.Click += (_, _) => _ = RestartWebServerAsync();
         menu.Items.Add(restartItem);
 
-        var logsItem = new ToolStripMenuItem("Apri cartella dati");
+        var logsItem = new ToolStripMenuItem("Open data folder");
         logsItem.Click += (_, _) => OpenDataFolder();
         menu.Items.Add(logsItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
         // Exit
-        var exitItem = new ToolStripMenuItem("Esci");
+        var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitApplication();
         menu.Items.Add(exitItem);
 
@@ -127,7 +126,6 @@ public class TrayApplicationContext : ApplicationContext
                 });
             });
 
-            builder.Services.AddSingleton<NdiEventLogService>();
             builder.Services.AddSignalR();
 
             builder.Services.AddSingleton<NDIDiscoveryService>();
@@ -237,31 +235,6 @@ public class TrayApplicationContext : ApplicationContext
         {
             var status = _discoveryService.GetSystemStatus();
             UpdateTrayFromStatus(status);
-
-            var snapshot = _discoveryService.GetAggregatedSnapshot();
-            foreach (var receiver in snapshot.Receivers)
-            {
-                foreach (var channel in receiver.Channels)
-                {
-                    if (string.IsNullOrEmpty(channel.EndpointUuid))
-                        continue;
-
-                    var current = channel.CurrentSource ?? string.Empty;
-                    if (_lastReceiverSources.TryGetValue(channel.EndpointUuid, out var previous))
-                    {
-                        if (!string.IsNullOrEmpty(previous) && string.IsNullOrEmpty(current))
-                        {
-                            _trayIcon.ShowBalloonTip(
-                                4000,
-                                "NDI Manager — source persa",
-                                $"{channel.EndpointName}: {previous}",
-                                ToolTipIcon.Warning);
-                        }
-                    }
-
-                    _lastReceiverSources[channel.EndpointUuid] = current;
-                }
-            }
         }
         catch
         {
@@ -283,11 +256,11 @@ public class TrayApplicationContext : ApplicationContext
         {
             _statusMenuItem.Text = status.Health switch
             {
-                "ok" => $"Stato: OK · {status.SenderCount} snd · {status.ReceiverCount} rcv",
-                "idle" => $"Stato: in attesa NDI · {status.SenderCount} snd · {status.ReceiverCount} rcv",
-                "degraded" => "Stato: listener parziale",
-                "error" => "Stato: errore listener",
-                _ => "Stato: sconosciuto",
+                "ok" => $"Status: OK · {status.SenderCount} snd · {status.ReceiverCount} rcv",
+                "idle" => $"Status: waiting for NDI · {status.SenderCount} snd · {status.ReceiverCount} rcv",
+                "degraded" => "Status: partial listener",
+                "error" => "Status: listener error",
+                _ => "Status: unknown",
             };
         }
 
@@ -309,7 +282,7 @@ public class TrayApplicationContext : ApplicationContext
 
         _trayIcon.Text = _serverRunning
             ? $"NDI Manager — http://localhost:{_currentPort} ({status.Health})"
-            : "NDI Manager — fermato";
+            : "NDI Manager — stopped";
     }
 
     private void UpdateStatus(bool running)
@@ -319,13 +292,13 @@ public class TrayApplicationContext : ApplicationContext
         if (_statusMenuItem != null)
         {
             _statusMenuItem.Text = running
-                ? "Stato: in esecuzione"
-                : "Stato: fermato";
+                ? "Status: running"
+                : "Status: stopped";
         }
 
         _trayIcon.Text = running
             ? $"NDI Manager — http://localhost:{_currentPort}"
-            : "NDI Manager — fermato";
+            : "NDI Manager — stopped";
     }
 
     #endregion
@@ -372,7 +345,7 @@ public class TrayApplicationContext : ApplicationContext
             SavePort(_currentPort);
 
             if (_portMenuItem != null)
-                _portMenuItem.Text = $"Porta: {_currentPort}";
+                _portMenuItem.Text = $"Port: {_currentPort}";
 
             _ = RestartWebServerAsync();
         }

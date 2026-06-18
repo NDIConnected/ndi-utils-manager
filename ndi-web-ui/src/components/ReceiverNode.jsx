@@ -1,7 +1,17 @@
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
-import { formatCount, channelStat } from '../utils/formatStats';
+import { formatCount } from '../utils/formatStats';
+import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import ReceiverStatsSections from './ReceiverStatsSections';
+import {
+  CompactStackedHandles,
+  compactCardStyle,
+  compactHeaderStyle,
+  compactAddressRowStyle,
+  compactToggleTitleProps,
+  detailedToggleTitleProps,
+  nodeDragHandleProps,
+} from './CompactNodeParts';
 
 const tallyChip = {
   pgm: {
@@ -25,21 +35,6 @@ const tallyChip = {
     lineHeight: 1.2,
   },
 };
-
-function channelHealthWarning(channel) {
-  if ((channel?.droppedFrames ?? 0) > 0) return 'Dropped frames';
-  if (channel?.isConnected && !channel?.currentSource) return 'Connected without source';
-  if (channel?.isStreaming && !channel?.videoCodec && channel?.videoPresent) return 'Streaming without codec';
-  return '';
-}
-
-function sumDroppedFrames(channels) {
-  if (!Array.isArray(channels)) return 0;
-  return channels.reduce(
-    (acc, ch) => acc + (Number(channelStat(ch, 'droppedFrames')) || 0),
-    0,
-  );
-}
 
 function channelTallyProgram(c) {
   return c?.tallyOnProgram === true || c?.tallyOnProgram === 'true';
@@ -280,6 +275,47 @@ export default function ReceiverNode({ data }) {
     const deviceTallyPvw = channels.some(channelTallyPreview);
     const hasActivity = connectedChannels.length > 0 || streamingChannels.length > 0;
     const totalDroppedFrames = sumDroppedFrames(channels);
+    const hasWarning = channels.some((ch) => channelHealthWarning(ch, { checkConnectedWithoutSource: true }));
+
+    if (data?.compactView) {
+      const cardStyle = compactCardStyle({
+        border: hasActivity ? '#3b82f6' : '#4b5563',
+        gradientFrom: hasActivity ? '#1e3a8a' : '#1f2937',
+        gradientTo: hasActivity ? '#1e40af' : '#374151',
+        handleSide: 'left',
+      });
+      return (
+        <div style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+          <CompactStackedHandles
+            channels={channels}
+            prefix="in"
+            handleType="target"
+            position={Position.Left}
+            connectedChannelIds={connectedChannelIds}
+            visibleHandleStyle={styles.channelHandle}
+            getTitle={(channel, idx) => getConnectionLabel(channel, idx)}
+          />
+          <div {...nodeDragHandleProps(compactHeaderStyle())}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+              <div style={styles.indicator(hasActivity)} />
+              <span>RECEIVER DEVICE</span>
+              {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
+            </div>
+            <span style={styles.badge(hasActivity)}>{channels.length} ch</span>
+          </div>
+          <div {...compactToggleTitleProps(data?.onToggleCompactView)}>{appDisplayName}</div>
+          {appSubDisplayName ? (
+            <div style={{ color: '#cbd5e1', fontSize: '11px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {appSubDisplayName}
+            </div>
+          ) : null}
+          <div style={compactAddressRowStyle()}>
+            <span style={styles.label}>Address:</span>
+            <span style={styles.value}>{data.address || '—'}</span>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div style={styles.node(hasActivity)}>
@@ -293,7 +329,7 @@ export default function ReceiverNode({ data }) {
             50% { opacity: .5; }
           }
         `}</style>
-        <div style={styles.header}>
+        <div {...nodeDragHandleProps(styles.header)}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(hasActivity)} />
             <span>RECEIVER DEVICE</span>
@@ -303,7 +339,14 @@ export default function ReceiverNode({ data }) {
           </span>
         </div>
 
-        <div style={styles.appValue}>{appDisplayName}</div>
+        {(() => {
+          const titleToggleProps = detailedToggleTitleProps(data?.onToggleCompactView);
+          return (
+            <div {...titleToggleProps} style={{ ...styles.appValue, ...titleToggleProps.style }}>
+              {appDisplayName}
+            </div>
+          );
+        })()}
         {appSubDisplayName && (
           <div style={styles.appSubValue}>{appSubDisplayName}</div>
         )}
@@ -404,10 +447,11 @@ export default function ReceiverNode({ data }) {
           const pvw = channelTallyPreview(channel);
           const label = getConnectionLabel(channel, idx);
           const sourceHint = shortSource(channel.currentSource);
-          const warning = channelHealthWarning(channel);
+          const warning = channelHealthWarning(channel, { checkConnectedWithoutSource: true });
           return (
             <div
               key={`in-row-${channel.channelId}-${idx}`}
+              className="nodrag nopan"
               style={{
                 ...styles.channelRow,
                 marginTop: idx === 0 ? '8px' : '2px',
@@ -588,7 +632,7 @@ export default function ReceiverNode({ data }) {
         </div>
       )}
 
-      <div style={styles.header}>
+      <div {...nodeDragHandleProps(styles.header)}>
         <div style={styles.headerLeft}>
           <div style={styles.indicator(isConnected)} />
           <span>RECEIVER</span>

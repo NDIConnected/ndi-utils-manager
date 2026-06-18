@@ -1,6 +1,6 @@
 # NDI Manager — User Manual
 
-**Version 2.9** · June 2026
+**Version 3.0** · June 2026
 
 NDI Manager is a Windows desktop application that discovers NDI senders and receivers on your network, shows them on a visual canvas, and lets you connect receiver inputs to sender outputs through the NDI Discovery Server.
 
@@ -20,12 +20,11 @@ This manual describes day-to-day use of the installed application and Web UI. Fo
 8. [Hosts sidebar](#8-hosts-sidebar)
 9. [Filters and search](#9-filters-and-search)
 10. [Table view](#10-table-view)
-11. [Events view](#11-events-view)
-12. [Node details and statistics](#12-node-details-and-statistics)
-13. [Layout tools](#13-layout-tools)
-14. [Configuration](#14-configuration)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Glossary](#16-glossary)
+11. [Node details and statistics](#11-node-details-and-statistics)
+12. [Layout tools](#12-layout-tools)
+13. [Configuration](#13-configuration)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Glossary](#15-glossary)
 
 ---
 
@@ -37,7 +36,6 @@ NDI Manager runs in the **Windows system tray**. It hosts a local web server and
 - **Drag connections** from a sender output to a receiver input
 - Monitor **video/audio statistics**, **tally**, and **dropped frames**
 - Work on large installations using **host grouping**, **filters**, and a **table view**
-- Inspect raw **NDI monitoring events** for diagnostics
 
 Connections are sent as NDI Discovery Server commands (`CONNECT` / `DISCONNECT`). The canvas reflects the real network state reported by NDI, not just local UI state.
 
@@ -48,6 +46,7 @@ Connections are sent as NDI Discovery Server commands (`CONNECT` / `DISCONNECT`)
 | Component | Requirement |
 |-----------|-------------|
 | Operating system | Windows 10/11 x64 |
+| .NET runtime | **Not required** — bundled in the installer (self-contained) |
 | NDI | NDI SDK 6 runtime (`Processing.NDI.Lib.x64.dll`) |
 | Network | NDI Discovery Server reachable from this PC (for remote monitoring and connect commands) |
 | Browser | Modern browser (Chrome, Edge, Firefox) for the Web UI |
@@ -59,7 +58,7 @@ The application listens on **localhost** by default (port **5000**). Other machi
 
 ## 3. Installation
 
-1. Run **`NDIManager-v2.9-Setup.exe`** (or the current installer from your release package).
+1. Run **`NDIManager-v3.0-Setup.exe`** (or the current installer from your release package).
 2. Follow the wizard. Optional steps:
    - Create a **desktop shortcut**
    - **Start with Windows** (auto-launch at login)
@@ -99,9 +98,9 @@ Right-click the tray icon:
 
 **Double-click** the tray icon to open the Web UI (same as **Open Web UI**).
 
-### Notifications
+### Data folder
 
-If a receiver **loses its source**, a balloon notification may appear while the app runs in the background. This helps catch dropped links without keeping the browser open.
+**Open data folder** opens `%LocalAppData%\NDIManager`. This stores **`settings.json`** (HTTP port only). Canvas layout, filters, and compact-view preferences are stored in the **browser** (`localStorage`), not in this folder.
 
 ---
 
@@ -122,12 +121,12 @@ http://localhost:5000
 - **Discovery pill** — e.g. `Discovery OK · 12 snd · 8 rcv`
   - Hover to see the Discovery Server URL
   - **Discovery partial** means one listener (send or recv) is not connected
-- **Tabs** — Canvas | Table | Events
+- **Tabs** — Canvas | Table
 - **Refresh** — force an immediate data refresh
 
 ### Footer
 
-- **Version** — e.g. `v2.9.0`
+- **Version** — e.g. `v3.0.0`
 - **Last update time** — when discovery last ran
 - **Bundle hash** — identifies the built Web UI file (useful to confirm the browser is not showing a cached old version)
 
@@ -155,6 +154,19 @@ Each node represents one **application instance** on a machine (e.g. vMix, OBS, 
 - **Collapsible** output/input rows — click **expand** to see all connectors
 - On large devices (16+ channels), only active or connected channels may show until expanded
 
+### Compact vs detailed view
+
+Click the device **name** (shown with a dotted underline) to toggle **compact** ↔ **detailed** for that device only. The choice is remembered per device in the browser.
+
+- **Compact** — small card: header, name, address, one connector (multi-channel devices use a stacked handle)
+- **Detailed** — full channel list, statistics, and expand/collapse controls
+
+### Moving nodes
+
+Drag a node by its **header bar** (`SENDER DEVICE` / `RECEIVER DEVICE` — cursor changes to **grab**). Other areas (name, channels, stats) are for clicks, not dragging.
+
+Drag nodes to rearrange; positions are **saved automatically** in the browser.
+
 ### Canvas controls
 
 Use the built-in React Flow controls (bottom-left):
@@ -163,16 +175,12 @@ Use the built-in React Flow controls (bottom-left):
 - **Fit view** — frame all nodes
 - **Mini-map** — overview of large topologies
 
-Drag nodes to rearrange; positions are **saved automatically** in the browser.
-
 ### Toolbar (Canvas tab)
 
 | Control | Description |
 |---------|-------------|
-| **Hosts** | Show the host sidebar |
-| **Canvas only** | Hide the host sidebar for more canvas space |
+| **Show hosts / Canvas only** | Toggle the host sidebar: hide it for more canvas space, or show it again to pick a host |
 | **Active only** | Hide devices with no streaming or connections |
-| **Compact / Comfort** | Toggle node density |
 | **ℹ️** | Open the metrics legend |
 | **Reset layout** | Restore default node positions |
 | **Align by host** | Arrange senders/receivers in columns per machine |
@@ -194,10 +202,10 @@ Drag nodes to rearrange; positions are **saved automatically** in the browser.
 
 | Appearance | Meaning |
 |------------|---------|
+| **Dashed yellow** | Connect **pending** NDI confirmation (line is still selectable) |
 | **Solid green**, animated | Connection **confirmed** by NDI (`source-name` matches on the receiver) |
-| **Dashed yellow** | Connect command **sent**, waiting for NDI to confirm |
 
-Click an edge to **focus** the connected sender and receiver in the view.
+**Click** a connection line to **select** it, then click the **×** button to disconnect. Lines appear immediately after you connect; you do not need to wait for the line to turn green.
 
 ### Disconnect
 
@@ -274,22 +282,7 @@ Click a column header to sort. Click a row to open the **channel detail drawer**
 
 ---
 
-## 11. Events view
-
-The **Events** tab shows a live log of NDI monitoring events from the Discovery Server listeners:
-
-- **SendListener** — sender-side events (green)
-- **RecvListener** — receiver-side events (blue)
-
-Use the filter box to search by UUID, event name, or value. Filter the dropdown to one listener type.
-
-Typical event names include `source-name`, `connection-state`, `video-codec`, `connected-receivers`, `video-frames-dropped`, etc.
-
-This view is **read-only** and intended for troubleshooting when the canvas shows unexpected state.
-
----
-
-## 12. Node details and statistics
+## 11. Node details and statistics
 
 ### Sender node summary
 
@@ -340,7 +333,7 @@ Press **ℹ️** in the toolbar to open a short explanation of Connected RX, Act
 
 ---
 
-## 13. Layout tools
+## 12. Layout tools
 
 ### Reset layout
 
@@ -358,13 +351,13 @@ With a host selected in the sidebar:
 
 1. Arrange nodes and set filters as desired.
 2. Click **Save preset** — stored in the browser (`localStorage`).
-3. Click **Load preset** on a later session to restore layout, filters, and density for that host.
+3. Click **Load preset** on a later session to restore layout and filters for that host.
 
 Presets are **per browser / per PC**, not shared across users.
 
 ---
 
-## 14. Configuration
+## 13. Configuration
 
 ### HTTP port
 
@@ -393,7 +386,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 
 ---
 
-## 15. Troubleshooting
+## 14. Troubleshooting
 
 ### Web UI is blank or shows old version
 
@@ -416,8 +409,13 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 
 ### Connected RX is 0 but I see a line on the canvas
 
-- **Yellow dashed edge** — connect command sent, NDI has not confirmed yet; wait a few seconds.
+- **Yellow dashed edge** — connect sent; NDI may still be confirming. You can already select and disconnect the line.
 - **Green edge** but RX = 0 — may be a timing/cache delay; click **Refresh**.
+
+### “You must install or update .NET” when launching the exe
+
+- You are running a **framework-dependent** build (e.g. from `bin\Debug`) instead of the **self-contained** installer or `publish\` output.
+- Reinstall from **`NDIManager-v3.0-Setup.exe`** or run from a self-contained `publish\` folder.
 
 ### Stats (frames sent, dropped frames) are zero
 
@@ -428,7 +426,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 
 - Requires a working **Recv Listener** connection to the Discovery Server.
 - The receiver must be registered on the Discovery Server (typical for managed NDI installations).
-- Check the **Events** tab for `connection-state` and error-related events.
+- Check the **Table** view for warning icons and connection state on the affected channel.
 
 ### Port already in use
 
@@ -442,7 +440,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 
 ---
 
-## 16. Glossary
+## 15. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -465,7 +463,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 | | |
 |---|---|
 | **Product** | NDI Manager 6.3 |
-| **Manual version** | 2.9 |
+| **Manual version** | 3.0 |
 | **Audience** | Operators and technical users |
 | **Related docs** | [CHANGELOG.md](../CHANGELOG.md), [INSTALLER_README.md](../INSTALLER_README.md) |
 

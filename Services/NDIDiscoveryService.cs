@@ -21,7 +21,6 @@ public class NDIDiscoveryService : BackgroundService
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _senderEventCache;  // Cache of sender UUID -> event data
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _receiverEventCache;  // Cache of receiver UUID -> event data
     private readonly ILogger<NDIDiscoveryService> _logger;
-    private readonly NdiEventLogService _eventLog;
     private readonly IHubContext<NdiHub>? _hubContext;
     private readonly System.Threading.Timer _discoveryTimer;
     private IntPtr _finderInstance = IntPtr.Zero;
@@ -34,10 +33,8 @@ public class NDIDiscoveryService : BackgroundService
         ILogger<NDIDiscoveryService> logger,
         ILoggerFactory loggerFactory,
         IConfiguration configuration,
-        NdiEventLogService eventLog,
         IHubContext<NdiHub>? hubContext = null)
     {
-        _eventLog = eventLog;
         _hubContext = hubContext;
         _logger = logger;
         _senders = new ConcurrentDictionary<string, NDISenderInfo>();
@@ -225,7 +222,7 @@ public class NDIDiscoveryService : BackgroundService
 
     private NdiSystemStatus BuildSystemStatus(NDIAggregatedSnapshot snapshot)
     {
-        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "2.9.0";
+        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.0.0";
         var health = "ok";
         if (!_sendListener.IsConnected && !_recvListener.IsConnected)
             health = "error";
@@ -890,8 +887,6 @@ public class NDIDiscoveryService : BackgroundService
             {
                 eventData[key] = evt.EventValue ?? string.Empty;
             }
-
-            _eventLog.Add("SendListener", evt.SenderUuid, key, evt.EventValue ?? string.Empty);
         }
     }
 
@@ -928,8 +923,6 @@ public class NDIDiscoveryService : BackgroundService
             {
                 eventData[key] = evt.EventValue ?? string.Empty;
             }
-
-            _eventLog.Add("RecvListener", evt.ReceiverUuid, key, evt.EventValue ?? string.Empty);
         }
     }
 

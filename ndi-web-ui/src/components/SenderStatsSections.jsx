@@ -198,8 +198,8 @@ export default function SenderStatsSections({
 
   const colorSummary = distinctChannelValues(channels, 'videoColorPrimaries').join(', ') || '-';
 
-  return (
-    <div ref={rootRef} onClick={(e) => e.stopPropagation()}>
+    return (
+    <div ref={rootRef} className="nodrag nopan" onClick={(e) => e.stopPropagation()}>
       <CollapsibleSection
         title="Video"
         summary={summaries.video}

@@ -1,11 +1,5 @@
 import { useMemo, useState } from 'react';
-
-function channelHealthWarning(channel) {
-  if ((channel?.droppedFrames ?? 0) > 0) return 'Dropped frames';
-  if (channel?.isConnected && !channel?.currentSource) return 'Connected without source';
-  if (channel?.isStreaming && !channel?.videoCodec && channel?.videoPresent) return 'Streaming without codec';
-  return '';
-}
+import { channelHealthWarning } from '../utils/channelHealth';
 
 export default function NdiTableView({
   snapshot,
@@ -31,7 +25,7 @@ export default function NdiTableView({
           audioCodec: channel.audioCodec || '—',
           streaming: channel.isStreaming ? 'Yes' : 'No',
           connections: channel.connectionCount ?? 0,
-          warning: channelHealthWarning(channel),
+          warning: channelHealthWarning(channel, { checkConnectedWithoutSource: true }),
           receiverUuid: channel.endpointUuid,
           deviceKey: device.deviceKey,
           channelId: channel.channelId,

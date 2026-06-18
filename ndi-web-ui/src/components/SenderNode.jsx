@@ -1,7 +1,17 @@
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 import { formatCount, channelStat } from '../utils/formatStats';
+import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import SenderStatsSections from './SenderStatsSections';
+import {
+  CompactStackedHandles,
+  compactCardStyle,
+  compactHeaderStyle,
+  compactAddressRowStyle,
+  compactToggleTitleProps,
+  detailedToggleTitleProps,
+  nodeDragHandleProps,
+} from './CompactNodeParts';
 
 const tallyChip = {
   pgm: {
@@ -25,20 +35,6 @@ const tallyChip = {
     lineHeight: 1.2,
   },
 };
-
-function channelHealthWarning(channel) {
-  if ((channel?.droppedFrames ?? 0) > 0) return 'Dropped frames';
-  if (channel?.isStreaming && !channel?.videoCodec && channel?.videoPresent) return 'Streaming without codec';
-  return '';
-}
-
-function sumDroppedFrames(channels) {
-  if (!Array.isArray(channels)) return 0;
-  return channels.reduce(
-    (acc, ch) => acc + (Number(channelStat(ch, 'droppedFrames')) || 0),
-    0,
-  );
-}
 
 function channelTallyProgram(c) {
   return c?.tallyOnProgram === true || c?.tallyOnProgram === 'true';
@@ -284,6 +280,47 @@ export default function SenderNode({ data }) {
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
     const totalDroppedFrames = sumDroppedFrames(channels);
+    const hasWarning = channels.some((ch) => channelHealthWarning(ch));
+
+    if (data?.compactView) {
+      const cardStyle = compactCardStyle({
+        border: COLOR_SCHEMES.green.border,
+        gradientFrom: COLOR_SCHEMES.green.gradient[0],
+        gradientTo: COLOR_SCHEMES.green.gradient[1],
+        handleSide: 'right',
+      });
+      return (
+        <div style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+          <div {...nodeDragHandleProps(compactHeaderStyle())}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+              <div style={styles.indicator(COLOR_SCHEMES.green, streamingChannels.length > 0)} />
+              <span>SENDER DEVICE</span>
+              {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
+            </div>
+            <span style={styles.badge(COLOR_SCHEMES.green)}>{channels.length} ch</span>
+          </div>
+          <div {...compactToggleTitleProps(data?.onToggleCompactView)}>{appDisplayName}</div>
+          {appSubDisplayName ? (
+            <div style={{ color: '#cbd5e1', fontSize: '11px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {appSubDisplayName}
+            </div>
+          ) : null}
+          <div style={compactAddressRowStyle()}>
+            <span style={styles.label}>Address:</span>
+            <span style={styles.value}>{data.address || '—'}</span>
+          </div>
+          <CompactStackedHandles
+            channels={channels}
+            prefix="out"
+            handleType="source"
+            position={Position.Right}
+            connectedChannelIds={connectedChannelIds}
+            visibleHandleStyle={styles.channelHandle(COLOR_SCHEMES.green)}
+            getTitle={(channel, idx) => getChannelConnectorLabel(channel, idx)}
+          />
+        </div>
+      );
+    }
 
     return (
       <div style={styles.node(COLOR_SCHEMES.green)}>
@@ -293,7 +330,7 @@ export default function SenderNode({ data }) {
             50% { opacity: 0.55; }
           }
         `}</style>
-        <div style={styles.header}>
+        <div {...nodeDragHandleProps(styles.header)}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(COLOR_SCHEMES.green, true)} />
             <span>SENDER DEVICE</span>
@@ -303,7 +340,14 @@ export default function SenderNode({ data }) {
           </span>
         </div>
 
-        <div style={styles.appValue}>{appDisplayName}</div>
+        {(() => {
+          const titleToggleProps = detailedToggleTitleProps(data?.onToggleCompactView);
+          return (
+            <div {...titleToggleProps} style={{ ...styles.appValue, ...titleToggleProps.style }}>
+              {appDisplayName}
+            </div>
+          );
+        })()}
         {appSubDisplayName && (
           <div style={styles.appSubValue}>{appSubDisplayName}</div>
         )}
@@ -412,6 +456,7 @@ export default function SenderNode({ data }) {
           return (
             <div
               key={`out-row-${channel.channelId}-${idx}`}
+              className="nodrag nopan"
               style={{
                 ...styles.channelRow,
                 marginTop: idx === 0 ? '8px' : '2px',
@@ -600,7 +645,7 @@ export default function SenderNode({ data }) {
       )}
 
       {/* Header */}
-      <div style={styles.header}>
+      <div {...nodeDragHandleProps(styles.header)}>
         <div style={styles.headerLeft}>
           <div style={styles.indicator(colorScheme, isActive)} />
           <span>SENDER</span>

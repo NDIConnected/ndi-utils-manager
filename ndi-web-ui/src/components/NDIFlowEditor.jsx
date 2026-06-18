@@ -17,7 +17,7 @@ import HostOverview from './HostOverview';
 import MetricsLegend from './MetricsLegend';
 import ChannelDetailDrawer from './ChannelDetailDrawer';
 import NdiTableView from './NdiTableView';
-import NdiEventsPanel from './NdiEventsPanel';
+import AutoMeasureLayout from './AutoMeasureLayout';
 import { useToast } from '../context/ToastContext';
 import { useNdiSignalR } from '../hooks/useNdiSignalR';
 import {
@@ -34,15 +34,13 @@ import {
   saveHostPreset,
   loadHostPreset,
   getBundleLabel,
-  getNodeGap,
+  mergeLayoutWithNewDevices,
+  isValidSavedPosition,
 } from '../utils/layoutUtils';
 
 const API_BASE = '/api/ndi';
 const HIDE_INTERNAL_CONNECTIONS = false;
-const NODE_LAYOUT_VERSION = '7';
-const DEFAULT_SENDER_X = 80;
-const DEFAULT_RECEIVER_X = 940;
-const DEFAULT_NODE_Y_START = 120;
+const NODE_LAYOUT_VERSION = '9';
 
 const styles = {
   container: { width: '100vw', height: '100vh', backgroundColor: '#111827', display: 'flex', flexDirection: 'column' },
@@ -143,13 +141,14 @@ const styles = {
   },
 };
 
-function mergeNodes(prevNodes, nextNodes) {
+function mergeNodes(prevNodes, nextNodes, draggingNodeIds) {
   const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
   return nextNodes.map((node) => {
     const prev = prevMap.get(node.id);
+    const keepDragPosition = prev?.position && draggingNodeIds.has(node.id);
     return {
       ...node,
-      position: prev?.position ?? node.position,
+      position: keepDragPosition ? prev.position : node.position,
       selected: prev?.selected ?? false,
     };
   });
@@ -220,12 +219,38 @@ function sourcesMatch(a, b) {
   return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
-function isConnectionConfirmed(conn, snapshot, isReceiverPending) {
-  if (isReceiverPending(conn.receiverUuid)) return false;
+function isConnectionConfirmed(conn, snapshot) {
+  if (conn?.optimistic) return true;
   const receiverDevice = snapshot.receivers.find((d) => d.deviceKey === conn.receiverDeviceKey);
   const channel = receiverDevice?.channels?.find((c) => c.channelId === conn.receiverChannelId);
   if (!channel) return false;
   return sourcesMatch(channel.currentSource, conn.sourceName);
+}
+
+function buildOptimisticConnection(details) {
+  const {
+    sourceDevice,
+    targetDevice,
+    sourceChannel,
+    targetChannel,
+    sourceName,
+    receiverUuid,
+  } = details;
+  if (!sourceDevice || !targetDevice || !sourceChannel || !targetChannel || !receiverUuid) return null;
+
+  return {
+    connectionId: `${sourceChannel.endpointUuid}->${targetChannel.endpointUuid}`,
+    senderDeviceKey: sourceDevice.deviceKey,
+    senderChannelId: sourceChannel.channelId,
+    senderLabel: sourceChannel.streamLabel,
+    senderUuid: sourceChannel.endpointUuid,
+    receiverDeviceKey: targetDevice.deviceKey,
+    receiverChannelId: targetChannel.channelId,
+    receiverLabel: targetChannel.streamLabel,
+    receiverUuid,
+    sourceName,
+    optimistic: true,
+  };
 }
 
 function FlowCanvas(props) {
@@ -248,18 +273,38 @@ export default function NDIFlowEditor() {
   const [hostFocus, setHostFocus] = useState(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showLegend, setShowLegend] = useState(() => localStorage.getItem('ndi-metrics-legend-seen') !== '1');
-  const [density, setDensity] = useState(() => localStorage.getItem('ndi-ui-density') || 'comfort');
+  const [compactDeviceKeys, setCompactDeviceKeys] = useState(() => {
+    try {
+      const raw = localStorage.getItem('ndi-compact-device-keys');
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const [expandedDeviceKeys, setExpandedDeviceKeys] = useState(() => new Set());
   const [channelDetail, setChannelDetail] = useState(null);
   const [connectPreview, setConnectPreview] = useState(null);
-  const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
   const [pendingEpoch, setPendingEpoch] = useState(0);
   const viewModeInitialized = useRef(false);
   const edgeReconnectSuccessful = useRef(true);
   const mutationBlockUntilRef = useRef(0);
   const suppressedReceiverUntilRef = useRef(new Map());
   const pendingReceiverUntilRef = useRef(new Map());
+  const optimisticConnectionsRef = useRef(new Map());
   const rfInstanceRef = useRef(null);
+  const draggingNodeIdsRef = useRef(new Set());
+  const layoutSeededRef = useRef(false);
+  const userLayoutRef = useRef(false);
+  const [autoMeasureLayout, setAutoMeasureLayout] = useState(() => {
+    try {
+      if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return true;
+      const saved = JSON.parse(localStorage.getItem('ndi-multichannel-node-positions') || '{}');
+      return !Object.values(saved).some(isValidSavedPosition);
+    } catch {
+      return true;
+    }
+  });
+  const [expandedLayoutEpoch, setExpandedLayoutEpoch] = useState(0);
 
   const [nodePositions, setNodePositions] = useState(() => {
     try {
@@ -293,10 +338,24 @@ export default function NDIFlowEditor() {
   const hostGroups = useMemo(() => buildHostGroups(snapshot), [snapshot]);
   const bundleLabel = useMemo(() => getBundleLabel(), []);
 
-  const markPendingReceiver = useCallback((receiverUuid, ms = 12000) => {
+  const markPendingReceiver = useCallback((receiverUuid, ms = 4000) => {
     if (!receiverUuid) return;
     pendingReceiverUntilRef.current.set(receiverUuid, Date.now() + ms);
     setPendingEpoch((e) => e + 1);
+  }, []);
+
+  const rememberOptimisticConnection = useCallback((details) => {
+    const conn = buildOptimisticConnection(details);
+    if (!conn) return;
+    optimisticConnectionsRef.current.set(conn.receiverUuid, conn);
+    setPendingEpoch((e) => e + 1);
+  }, []);
+
+  const clearOptimisticConnection = useCallback((receiverUuid) => {
+    if (!receiverUuid) return;
+    if (optimisticConnectionsRef.current.delete(receiverUuid)) {
+      setPendingEpoch((e) => e + 1);
+    }
   }, []);
 
   const applySnapshotPayload = useCallback((data) => {
@@ -340,6 +399,20 @@ export default function NDIFlowEditor() {
     }, [applySnapshotPayload]),
   });
 
+  const toggleCompactDevice = useCallback((nodeId) => {
+    setCompactDeviceKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      localStorage.setItem('ndi-compact-device-keys', JSON.stringify([...next]));
+      return next;
+    });
+    if (!userLayoutRef.current) {
+      setAutoMeasureLayout(true);
+      setExpandedLayoutEpoch((epoch) => epoch + 1);
+    }
+  }, []);
+
   const toggleDeviceExpanded = useCallback((nodeId) => {
     setExpandedDeviceKeys((prev) => {
       const next = new Set(prev);
@@ -347,6 +420,10 @@ export default function NDIFlowEditor() {
       else next.add(nodeId);
       return next;
     });
+    if (!userLayoutRef.current) {
+      setAutoMeasureLayout(true);
+      setExpandedLayoutEpoch((epoch) => epoch + 1);
+    }
   }, []);
 
   useEffect(() => {
@@ -396,24 +473,28 @@ export default function NDIFlowEditor() {
   }, []);
 
   const resetLayout = useCallback(() => {
-    const positions = computeDefaultLayout(snapshot.senders, snapshot.receivers, density);
+    userLayoutRef.current = false;
+    setAutoMeasureLayout(true);
+    const positions = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
     persistPositions(positions);
     toast('Layout reset', 'success');
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.2, duration: 350 }), 100);
-  }, [snapshot.senders, snapshot.receivers, density, persistPositions, toast]);
+    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.15, maxZoom: 1, duration: 350 }), 100);
+  }, [snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
 
   const alignLayoutByHost = useCallback(() => {
+    userLayoutRef.current = false;
+    setAutoMeasureLayout(true);
     let senders = snapshot.senders;
     let receivers = snapshot.receivers;
     if (hostFocus) {
       senders = filterDevicesByHost(senders, hostFocus);
       receivers = filterDevicesByHost(receivers, hostFocus);
     }
-    const positions = computeHostAlignedLayout(senders, receivers, density);
+    const positions = computeHostAlignedLayout(senders, receivers, expandedDeviceKeys, compactDeviceKeys);
     persistPositions(positions);
     toast('Layout aligned by host', 'success');
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.15, duration: 350 }), 100);
-  }, [snapshot.senders, snapshot.receivers, hostFocus, density, persistPositions, toast]);
+    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 100);
+  }, [snapshot.senders, snapshot.receivers, hostFocus, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
 
   const saveCurrentHostPreset = useCallback(() => {
     if (!hostFocus) {
@@ -425,10 +506,9 @@ export default function NDIFlowEditor() {
       senderFilter,
       receiverFilter,
       showActiveOnly,
-      density,
     });
     toast(`Preset saved for ${hostFocus}`, 'success');
-  }, [hostFocus, nodePositions, senderFilter, receiverFilter, showActiveOnly, density, toast]);
+  }, [hostFocus, nodePositions, senderFilter, receiverFilter, showActiveOnly, toast]);
 
   const loadCurrentHostPreset = useCallback(() => {
     if (!hostFocus) {
@@ -444,10 +524,6 @@ export default function NDIFlowEditor() {
     if (preset.senderFilter != null) setSenderFilter(preset.senderFilter);
     if (preset.receiverFilter != null) setReceiverFilter(preset.receiverFilter);
     if (preset.showActiveOnly != null) setShowActiveOnly(preset.showActiveOnly);
-    if (preset.density) {
-      setDensity(preset.density);
-      localStorage.setItem('ndi-ui-density', preset.density);
-    }
     toast(`Preset loaded for ${hostFocus}`, 'success');
   }, [hostFocus, persistPositions, toast]);
 
@@ -494,18 +570,95 @@ export default function NDIFlowEditor() {
     }
   }, [blockPollingDuringMutation, suppressReceiverConnection, fetchDevices, toast]);
 
+  const handleMeasuredLayout = useCallback((positions) => {
+    if (userLayoutRef.current) {
+      setAutoMeasureLayout(false);
+      return;
+    }
+    persistPositions(positions);
+    setAutoMeasureLayout(false);
+    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 80);
+  }, [persistPositions]);
+
   const handleNodesChange = useCallback((changes) => {
     onNodesChange(changes);
     changes.forEach((change) => {
-      if (change.type === 'position' && change.position && !change.dragging) {
-        setNodePositions((prev) => {
-          const updated = { ...prev, [change.id]: change.position };
-          localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(updated));
-          return updated;
-        });
+      if (change.type === 'position') {
+        if (change.dragging) draggingNodeIdsRef.current.add(change.id);
+        else draggingNodeIdsRef.current.delete(change.id);
+
+        if (change.position && !change.dragging && isValidSavedPosition(change.position)) {
+          userLayoutRef.current = true;
+          setAutoMeasureLayout(false);
+          setNodePositions((prev) => {
+            const updated = { ...prev, [change.id]: change.position };
+            localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(updated));
+            return updated;
+          });
+        }
       }
     });
   }, [onNodesChange]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const nodeIds = [
+      ...snapshot.senders.map((d) => `sender-device-${d.deviceKey}`),
+      ...snapshot.receivers.map((d) => `receiver-device-${d.deviceKey}`),
+    ];
+    if (nodeIds.length === 0) return;
+
+    const validSaved = nodeIds.filter((id) => isValidSavedPosition(nodePositions[id])).length;
+
+    if (!layoutSeededRef.current && validSaved === 0) {
+      layoutSeededRef.current = true;
+      userLayoutRef.current = false;
+      setAutoMeasureLayout(true);
+      persistPositions(computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys));
+      return;
+    }
+
+    if (validSaved < nodeIds.length) {
+      const merged = mergeLayoutWithNewDevices(
+        nodePositions,
+        snapshot.senders,
+        snapshot.receivers,
+        expandedDeviceKeys,
+        compactDeviceKeys,
+      );
+      const changed = nodeIds.some((id) => {
+        const before = nodePositions[id];
+        const after = merged[id];
+        if (!isValidSavedPosition(before)) return after != null;
+        return before.x !== after?.x || before.y !== after?.y;
+      });
+      if (changed) persistPositions(merged);
+    }
+
+    layoutSeededRef.current = true;
+  }, [
+    loading,
+    snapshot.senders,
+    snapshot.receivers,
+    expandedDeviceKeys,
+    nodePositions,
+    persistPositions,
+    compactDeviceKeys,
+  ]);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return;
+      const saved = JSON.parse(localStorage.getItem('ndi-multichannel-node-positions') || '{}');
+      if (Object.values(saved).some(isValidSavedPosition)) {
+        userLayoutRef.current = true;
+        setAutoMeasureLayout(false);
+      }
+    } catch {
+      // Ignore malformed layout cache.
+    }
+  }, []);
 
   const onConnectStart = useCallback((_evt, params) => {
     const { sourceName } = resolveConnectionDetails(params, snapshot);
@@ -518,30 +671,46 @@ export default function NDIFlowEditor() {
 
   const onConnect = useCallback(async (params) => {
     setConnectPreview(null);
-    const { sourceName, receiverUuid } = resolveConnectionDetails(params, snapshot);
+    const details = resolveConnectionDetails(params, snapshot);
+    const { sourceName, receiverUuid } = details;
     if (!receiverUuid || !sourceName) return;
 
     blockPollingDuringMutation();
     markPendingReceiver(receiverUuid);
+    rememberOptimisticConnection(details);
     try {
       const response = await axios.post(`${API_BASE}/connect`, { receiverUuid, sourceName });
       if (!response?.data?.success) {
+        clearOptimisticConnection(receiverUuid);
         toast(`Connect failed: ${response?.data?.message ?? 'error'}`, 'error');
       } else {
         toast(`Connect sent → ${sourceName}`, 'success');
+        fetchDevices(true);
       }
     } catch {
+      clearOptimisticConnection(receiverUuid);
       toast('Connect error', 'error');
     } finally {
-      setTimeout(() => fetchDevices(true), 600);
+      setTimeout(() => fetchDevices(true), 400);
+      setTimeout(() => fetchDevices(true), 1200);
     }
-  }, [snapshot, fetchDevices, blockPollingDuringMutation, resolveConnectionDetails, markPendingReceiver, toast]);
+  }, [
+    snapshot,
+    fetchDevices,
+    blockPollingDuringMutation,
+    resolveConnectionDetails,
+    markPendingReceiver,
+    rememberOptimisticConnection,
+    clearOptimisticConnection,
+    toast,
+  ]);
 
   const onEdgesDelete = useCallback(async (edgesToDelete) => {
     blockPollingDuringMutation();
     for (const edge of edgesToDelete) {
       const receiverUuid = edge?.data?.receiverUuid;
       if (!receiverUuid) continue;
+      clearOptimisticConnection(receiverUuid);
       suppressReceiverConnection(receiverUuid);
       try {
         const response = await axios.post(`${API_BASE}/disconnect`, { receiverUuid });
@@ -556,7 +725,7 @@ export default function NDIFlowEditor() {
     }
     setTimeout(() => fetchDevices(true), 800);
     setTimeout(() => fetchDevices(true), 1800);
-  }, [fetchDevices, blockPollingDuringMutation, suppressReceiverConnection, toast]);
+  }, [fetchDevices, blockPollingDuringMutation, suppressReceiverConnection, clearOptimisticConnection, toast]);
 
   const disconnectEdgeByReceiver = useCallback(async (edge) => {
     const receiverUuid = edge?.data?.receiverUuid;
@@ -576,7 +745,11 @@ export default function NDIFlowEditor() {
 
     blockPollingDuringMutation();
     markPendingReceiver(newReceiverUuid);
-    if (oldReceiverUuid && oldReceiverUuid !== newReceiverUuid) suppressReceiverConnection(oldReceiverUuid);
+    rememberOptimisticConnection(resolveConnectionDetails(newConnection, snapshot));
+    if (oldReceiverUuid && oldReceiverUuid !== newReceiverUuid) {
+      clearOptimisticConnection(oldReceiverUuid);
+      suppressReceiverConnection(oldReceiverUuid);
+    }
     suppressReceiverConnection(newReceiverUuid, 2000);
 
     try {
@@ -595,7 +768,17 @@ export default function NDIFlowEditor() {
       setTimeout(() => fetchDevices(true), 800);
       setTimeout(() => fetchDevices(true), 1800);
     }
-  }, [snapshot, fetchDevices, blockPollingDuringMutation, resolveConnectionDetails, suppressReceiverConnection, markPendingReceiver, toast]);
+  }, [
+    snapshot,
+    fetchDevices,
+    blockPollingDuringMutation,
+    resolveConnectionDetails,
+    suppressReceiverConnection,
+    markPendingReceiver,
+    rememberOptimisticConnection,
+    clearOptimisticConnection,
+    toast,
+  ]);
 
   const onReconnectEnd = useCallback(async (_event, edge) => {
     if (edgeReconnectSuccessful.current) return;
@@ -609,14 +792,6 @@ export default function NDIFlowEditor() {
   const dismissLegend = useCallback(() => {
     setShowLegend(false);
     localStorage.setItem('ndi-metrics-legend-seen', '1');
-  }, []);
-
-  const toggleDensity = useCallback(() => {
-    setDensity((prev) => {
-      const next = prev === 'compact' ? 'comfort' : 'compact';
-      localStorage.setItem('ndi-ui-density', next);
-      return next;
-    });
   }, []);
 
   useEffect(() => {
@@ -633,8 +808,28 @@ export default function NDIFlowEditor() {
       filteredReceivers = filteredReceivers.filter(deviceHasActivity);
     }
 
+    const senderByDeviceKey = new Map(filteredSenders.map((d) => [d.deviceKey, d]));
+    const receiverByDeviceKey = new Map(filteredReceivers.map((d) => [d.deviceKey, d]));
+
+    const snapshotConnectionIds = new Set(
+      snapshot.connections.map((conn) => conn.receiverUuid?.toLowerCase()).filter(Boolean),
+    );
+    optimisticConnectionsRef.current.forEach((conn, receiverUuid) => {
+      if (snapshotConnectionIds.has(receiverUuid.toLowerCase())) {
+        optimisticConnectionsRef.current.delete(receiverUuid);
+      }
+    });
+
+    const mergedConnections = [...snapshot.connections];
+    optimisticConnectionsRef.current.forEach((conn) => {
+      const exists = mergedConnections.some(
+        (existing) => existing.receiverUuid?.toLowerCase() === conn.receiverUuid?.toLowerCase(),
+      );
+      if (!exists) mergedConnections.push(conn);
+    });
+
     const connectedByDeviceKey = new Map();
-    snapshot.connections.forEach((conn) => {
+    mergedConnections.forEach((conn) => {
       const add = (deviceKey, channelId) => {
         if (!deviceKey || !channelId) return;
         if (!connectedByDeviceKey.has(deviceKey)) connectedByDeviceKey.set(deviceKey, new Set());
@@ -644,9 +839,7 @@ export default function NDIFlowEditor() {
       add(conn.receiverDeviceKey, conn.receiverChannelId);
     });
 
-    const senderByDeviceKey = new Map(filteredSenders.map((d) => [d.deviceKey, d]));
-    const receiverByDeviceKey = new Map(filteredReceivers.map((d) => [d.deviceKey, d]));
-    const visibleConnections = snapshot.connections.filter((conn) => {
+    const visibleConnections = mergedConnections.filter((conn) => {
       if (!senderByDeviceKey.has(conn.senderDeviceKey)) return false;
       if (!receiverByDeviceKey.has(conn.receiverDeviceKey)) return false;
       if (isReceiverConnectionSuppressed(conn.receiverUuid)) return false;
@@ -672,8 +865,12 @@ export default function NDIFlowEditor() {
       );
     });
 
-    const nodeGap = getNodeGap(filteredSenders.length + filteredReceivers.length, density);
-    const compactPadding = density === 'compact' ? 8 : 12;
+    const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
+    const resolvePosition = (nodeId) => {
+      const saved = nodePositions[nodeId];
+      if (isValidSavedPosition(saved)) return saved;
+      return stackedLayout[nodeId] || { x: 80, y: 120 };
+    };
 
     const buildNodeData = (device, rolePrefix) => {
       const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
@@ -686,8 +883,8 @@ export default function NDIFlowEditor() {
         maxVisibleHandles: MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
         connectedChannelIds: connectedByDeviceKey.get(device.deviceKey) || new Set(),
         logicalConnectionCount: logicalConnectionsByDeviceKey.get(device.deviceKey) || 0,
-        density,
-        compactPadding,
+        compactView: compactDeviceKeys.has(nodeId),
+        onToggleCompactView: () => toggleCompactDevice(nodeId),
         onToggleExpand: () => toggleDeviceExpanded(nodeId),
         onChannelSelect: (channel) => handleChannelSelect({
           device,
@@ -713,25 +910,27 @@ export default function NDIFlowEditor() {
       };
     };
 
-    const senderNodes = filteredSenders.map((device, index) => ({
-      id: `sender-device-${device.deviceKey}`,
-      type: 'senderNode',
-      position: nodePositions[`sender-device-${device.deviceKey}`] || {
-        x: DEFAULT_SENDER_X,
-        y: DEFAULT_NODE_Y_START + index * nodeGap,
-      },
-      data: buildNodeData(device, 'sender'),
-    }));
+    const senderNodes = filteredSenders.map((device) => {
+      const nodeId = `sender-device-${device.deviceKey}`;
+      return {
+        id: nodeId,
+        type: 'senderNode',
+        dragHandle: '.node-drag-handle',
+        position: resolvePosition(nodeId),
+        data: buildNodeData(device, 'sender'),
+      };
+    });
 
-    const receiverNodes = filteredReceivers.map((device, index) => ({
-      id: `receiver-device-${device.deviceKey}`,
-      type: 'receiverNode',
-      position: nodePositions[`receiver-device-${device.deviceKey}`] || {
-        x: DEFAULT_RECEIVER_X,
-        y: DEFAULT_NODE_Y_START + index * nodeGap,
-      },
-      data: buildNodeData(device, 'receiver'),
-    }));
+    const receiverNodes = filteredReceivers.map((device) => {
+      const nodeId = `receiver-device-${device.deviceKey}`;
+      return {
+        id: nodeId,
+        type: 'receiverNode',
+        dragHandle: '.node-drag-handle',
+        position: resolvePosition(nodeId),
+        data: buildNodeData(device, 'receiver'),
+      };
+    });
 
     const nextNodes = [...senderNodes, ...receiverNodes];
     const groupedConnections = new Map();
@@ -751,7 +950,7 @@ export default function NDIFlowEditor() {
       });
 
       ordered.forEach((conn, laneIndex) => {
-        const confirmed = isConnectionConfirmed(conn, snapshot, isReceiverPending);
+        const confirmed = isConnectionConfirmed(conn, snapshot);
         const color = confirmed ? '#4ade80' : '#facc15';
         const sourceNodeId = `sender-device-${conn.senderDeviceKey}`;
         const targetNodeId = `receiver-device-${conn.receiverDeviceKey}`;
@@ -791,7 +990,7 @@ export default function NDIFlowEditor() {
       });
     });
 
-    setNodes((prev) => mergeNodes(prev, nextNodes));
+    setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current));
     setEdges((prev) => mergeEdges(prev, nextEdges));
     if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
   }, [
@@ -807,10 +1006,11 @@ export default function NDIFlowEditor() {
     showActiveOnly,
     expandedDeviceKeys,
     toggleDeviceExpanded,
-    density,
     handleChannelSelect,
     pendingEpoch,
     isReceiverPending,
+    compactDeviceKeys,
+    toggleCompactDevice,
   ]);
 
   useEffect(() => {
@@ -867,26 +1067,19 @@ export default function NDIFlowEditor() {
             <button type="button" style={styles.viewBtn(mainTab === 'table')} onClick={() => setMainTab('table')}>
               Table
             </button>
-            <button type="button" style={styles.viewBtn(mainTab === 'events')} onClick={() => setMainTab('events')}>
-              Events
-            </button>
             {mainTab === 'canvas' ? (
-              <>
-                <button type="button" style={styles.viewBtn(viewMode === 'overview')} onClick={() => setViewMode('overview')}>
-                  Hosts
-                </button>
-                <button type="button" style={styles.viewBtn(viewMode === 'flow')} onClick={() => setViewMode('flow')}>
-                  Canvas only
-                </button>
-              </>
+              <button
+                type="button"
+                style={styles.viewBtn(viewMode === 'flow')}
+                onClick={() => setViewMode((v) => (v === 'flow' ? 'overview' : 'flow'))}
+              >
+                {viewMode === 'flow' ? 'Show hosts' : 'Canvas only'}
+              </button>
             ) : null}
             <label style={styles.checkLabel}>
               <input type="checkbox" checked={showActiveOnly} onChange={(e) => setShowActiveOnly(e.target.checked)} />
               Active only
             </label>
-            <button type="button" style={styles.viewBtn(false)} onClick={toggleDensity}>
-              {density === 'compact' ? 'Comfort' : 'Compact'}
-            </button>
             <button type="button" style={styles.viewBtn(false)} onClick={() => setShowLegend(true)} title="Metrics legend">
               ℹ️
             </button>
@@ -934,8 +1127,7 @@ export default function NDIFlowEditor() {
       </div>
 
       <div style={styles.body}>
-        {mainTab === 'canvas' && (viewMode === 'overview' ||
-          snapshot.senders.length + snapshot.receivers.length > LARGE_NETWORK_DEVICE_THRESHOLD) && (
+        {mainTab === 'canvas' && viewMode === 'overview' && (
           <HostOverview
             hostGroups={hostGroups}
             selectedHostKey={hostFocus}
@@ -949,6 +1141,14 @@ export default function NDIFlowEditor() {
           <div style={styles.flowPane}>
             {showLegend ? <MetricsLegend onClose={dismissLegend} /> : null}
             <ReactFlowProvider>
+              <AutoMeasureLayout
+                enabled={autoMeasureLayout}
+                senders={snapshot.senders}
+                receivers={snapshot.receivers}
+                expandedDeviceKeys={expandedDeviceKeys}
+                expandedLayoutEpoch={expandedLayoutEpoch}
+                onLayout={handleMeasuredLayout}
+              />
               <FlowCanvas
                 nodes={nodes}
                 edges={edges}
@@ -965,6 +1165,8 @@ export default function NDIFlowEditor() {
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 fitView={isFirstLoad}
+                selectNodesOnDrag={false}
+                nodeDragThreshold={2}
                 minZoom={0.05}
                 maxZoom={1.5}
                 attributionPosition="bottom-right"
@@ -992,10 +1194,6 @@ export default function NDIFlowEditor() {
           />
         ) : null}
 
-        {mainTab === 'events' ? (
-          <NdiEventsPanel refreshToken={eventsRefreshToken} />
-        ) : null}
-
         {channelDetail ? (
           <ChannelDetailDrawer detail={channelDetail} onClose={() => setChannelDetail(null)} />
         ) : null}
@@ -1015,7 +1213,7 @@ export default function NDIFlowEditor() {
 
       <div style={styles.footer}>
         <span>
-          v{systemStatus?.appVersion || '2.9.0'}
+          v{systemStatus?.appVersion || '3.0.0'}
           {systemStatus?.lastDiscoveryAt
             ? ` · updated ${new Date(systemStatus.lastDiscoveryAt).toLocaleTimeString('en-US')}`
             : ''}

@@ -17,15 +17,6 @@ public class NdiSystemStatus
     public string Health { get; set; } = "unknown";
 }
 
-public class NdiEventLogEntry
-{
-    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public string Source { get; set; } = string.Empty;
-    public string EndpointUuid { get; set; } = string.Empty;
-    public string EventName { get; set; } = string.Empty;
-    public string EventValue { get; set; } = string.Empty;
-}
-
 public class NdiBulkDisconnectRequest
 {
     public List<string> ReceiverUuids { get; set; } = new();

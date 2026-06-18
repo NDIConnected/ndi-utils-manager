@@ -223,7 +223,7 @@ export default function ReceiverStatsSections({
   };
 
   return (
-    <div onClick={(e) => e.stopPropagation()}>
+    <div className="nodrag nopan" onClick={(e) => e.stopPropagation()}>
       <CollapsibleSection
         title="Connection"
         summary={summaries.connection}

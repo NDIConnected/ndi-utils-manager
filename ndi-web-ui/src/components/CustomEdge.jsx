@@ -38,7 +38,7 @@ export default function CustomEdge({
   style,
   data,
 }) {
-  const { deleteElements } = useReactFlow();
+  const { deleteElements, setEdges } = useReactFlow();
   const laneIndex = Number(data?.edgeLaneIndex ?? 0);
   const laneCount = Math.max(1, Number(data?.edgeLaneCount ?? 1));
   const laneOffset = 0;
@@ -69,7 +69,10 @@ export default function CustomEdge({
 
   const onPathClick = (evt) => {
     evt.stopPropagation();
-    data?.onFocus?.();
+    setEdges((eds) => eds.map((edge) => ({
+      ...edge,
+      selected: edge.id === id,
+    })));
   };
 
   return (
@@ -103,7 +106,7 @@ export default function CustomEdge({
             onMouseLeave={(e) => {
               e.target.style.background = '#ef4444';
             }}
-            title="Disconnect"
+            title={confirmed ? 'Disconnect' : 'Cancel pending connection'}
           >
             ×
           </div>

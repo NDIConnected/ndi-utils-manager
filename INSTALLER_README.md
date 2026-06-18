@@ -1,40 +1,52 @@
 # NDI Manager 6.3 - Installer Build Instructions
 
-## Version 2.9
+## Version 3.0
 
 ## Overview
 
 This document describes how to build and package the standalone desktop/tray version of NDI Manager using Inno Setup.
 
-## Key Release Notes (v2.9)
+## Key Release Notes (v3.0)
 
-- Web UI v2.9: SignalR, table/events tabs, dropped frames, English UI, UX fixes
+- Web UI v3.0: per-device compact view, drag handle, instant connection select/disconnect, layout fixes
 - Standalone WinForms tray application (not a Windows Service)
-- Self-contained `.NET 9` publish for `win-x64`
-- Installer output: `Output\NDIManager-v2.9-Setup.exe`
-- Unified icon branding with `MAN_icon.ico` for:
-  - installer executable
-  - application executable
-  - tray/taskbar icon
+- **Self-contained** `.NET 9` publish for `win-x64` — **no separate .NET install** on target machines
+- Tray menu in English; disconnect balloon notifications removed
+- Installer output: `Output\NDIManager-v3.0-Setup.exe`
+- Unified icon branding with `MAN_icon.ico` for installer, application, and tray
 
 ## Prerequisites
 
-1. **Inno Setup 6.x**
-   - https://jrsoftware.org/isdl.php
-2. **.NET SDK 9.x** installed
-3. NDI SDK runtime DLL available at:
+1. **Inno Setup 6.x** — https://jrsoftware.org/isdl.php
+2. **.NET SDK 9.x** (build machine only)
+3. **Node.js** (to rebuild the Web UI)
+4. NDI SDK runtime DLL at:
    - `C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll`
 
 ## Build and Packaging Steps
 
-### 1) Build frontend
+### Option A — script (recommended)
+
+```powershell
+cd ndi-web-ui
+npm run build
+cd ..
+Remove-Item .\wwwroot\* -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item .\ndi-web-ui\dist\* .\wwwroot\ -Recurse -Force
+.\scripts\publish-standalone.ps1
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ".\NDIManager-Setup.iss"
+```
+
+### Option B — manual steps
+
+#### 1) Build frontend
 
 ```powershell
 cd ndi-web-ui
 npm run build
 ```
 
-### 2) Copy frontend into backend static folder
+#### 2) Copy frontend into backend static folder
 
 ```powershell
 cd ..
@@ -42,20 +54,23 @@ Remove-Item .\wwwroot\* -Recurse -Force
 Copy-Item .\ndi-web-ui\dist\* .\wwwroot\ -Recurse -Force
 ```
 
-### 3) Publish backend (self-contained)
+#### 3) Publish backend (self-contained)
 
 ```powershell
 dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
 ```
 
-### 4) Compile installer
+Verify `publish\NDIManager.runtimeconfig.json` contains `"includedFrameworks"` (not `"frameworks"` only).
+
+#### 4) Compile installer
 
 ```powershell
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ".\NDIManager-Setup.iss"
 ```
 
 Result:
-- `Output\NDIManager-v2.9-Setup.exe`
+
+- `Output\NDIManager-v3.0-Setup.exe`
 
 ## Installer Behavior
 
@@ -70,9 +85,11 @@ Result:
 
 - App runs in system tray
 - Right-click tray icon:
-  - Open Web UI
-  - Change port
-  - Exit
+  - **Open Web UI**
+  - **Port** — change HTTP port
+  - **Restart service**
+  - **Open data folder** — `%LocalAppData%\NDIManager`
+  - **Exit**
 - Default Web UI URL: `http://localhost:5000` (configurable in-app)
 
 ## Installed File Layout (simplified)
@@ -87,11 +104,17 @@ Result:
 └── License\
 ```
 
+User settings (HTTP port only): `%LocalAppData%\NDIManager\settings.json`
+
 ## Uninstall
 
 The uninstaller closes running `NDIManager.exe`, removes installed files, and removes shortcuts.
 
 ## Troubleshooting
+
+### App shows “You must install or update .NET”
+
+- The publish folder was not built **self-contained**. Re-run step 3 with `--self-contained true` and confirm `includedFrameworks` in `runtimeconfig.json`.
 
 ### App does not start
 
@@ -103,6 +126,7 @@ The uninstaller closes running `NDIManager.exe`, removes installed files, and re
 - Confirm app is running in tray
 - Verify selected port is not occupied
 - Open from tray menu to avoid URL/port mismatch
+- Hard refresh browser: **Ctrl+F5**
 
 ### Installer compile fails
 

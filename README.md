@@ -2,16 +2,23 @@
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
+**Current release:** version **3.0** — self-contained installer, no separate .NET runtime required.
+
 Repository: https://github.com/NDIConnected/ndi-utils-manager
 
 ## Requirements
 
-- Windows x64  
-- [.NET SDK 9](https://dotnet.microsoft.com/download)  
-- **NDI SDK 6** installed, with the DLL at  
-  `C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll`  
-  (as referenced by the project file)  
-- Node.js to develop or rebuild the UI (see the `ndi-web-ui` folder)
+- Windows 10/11 x64  
+- **NDI SDK 6** runtime (`Processing.NDI.Lib.x64.dll`) — installed with NDI Tools/SDK  
+- Node.js — only if you **rebuild** the Web UI from source  
+
+The published installer bundles the .NET runtime. End users do **not** need to install .NET separately.
+
+## Quick start (installed app)
+
+1. Run **`NDIManager-v3.0-Setup.exe`** from `Output\` (after building the installer) or your release package.  
+2. Use the **system tray** icon → **Open Web UI** (default `http://localhost:5000`).  
+3. Drag connections on the **Canvas** tab; use **Table** for a receiver list.
 
 ## Development run
 
@@ -37,8 +44,28 @@ In production the backend serves static files from `wwwroot/` (see below).
 
 ## Installer and release packaging
 
-Full pipeline (frontend → `wwwroot` → publish → Inno Setup):  
-[INSTALLER_README.md](INSTALLER_README.md).
+Full pipeline (frontend → `wwwroot` → publish → Inno Setup):
+
+```powershell
+.\scripts\publish-standalone.ps1
+npm run build --prefix ndi-web-ui
+# then copy dist to wwwroot if not using the script's full pipeline
+dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ".\NDIManager-Setup.iss"
+```
+
+Details: [INSTALLER_README.md](INSTALLER_README.md).
+
+## What's new in 3.0 (summary)
+
+- **Per-device compact view** — click a device **name** to toggle compact ↔ detailed (saved per device).  
+- **Drag handle** — move nodes from the **header bar** (`SENDER DEVICE` / `RECEIVER DEVICE`).  
+- **Instant connection lines** — optimistic edges; select and disconnect without waiting for NDI confirm.  
+- **Auto layout** — stacked layout with post-render height measurement (no overlapping nodes on first load).  
+- **Tray menu in English**; disconnect **balloon notifications removed**.  
+- **Self-contained publish** — fixed installer/runtime dependency issues.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## Further documentation
 
@@ -53,4 +80,6 @@ Full pipeline (frontend → `wwwroot` → publish → Inno Setup):
 | `Controllers/`, `Services/` | API and NDI discovery |
 | `ndi-web-ui/` | React + Vite |
 | `wwwroot/` | Built UI served by the app (build output, not versioned) |
+| `publish/` | Self-contained release output for the installer |
+| `scripts/publish-standalone.ps1` | Publish helper (self-contained win-x64) |
 | `NDIManager-Setup.iss` | Inno Setup installer script |

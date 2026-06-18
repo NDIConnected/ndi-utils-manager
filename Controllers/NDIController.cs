@@ -9,16 +9,13 @@ namespace NDIManager.Controllers;
 public class NDIController : ControllerBase
 {
     private readonly NDIDiscoveryService _discoveryService;
-    private readonly NdiEventLogService _eventLog;
     private readonly ILogger<NDIController> _logger;
 
     public NDIController(
         NDIDiscoveryService discoveryService,
-        NdiEventLogService eventLog,
         ILogger<NDIController> logger)
     {
         _discoveryService = discoveryService;
-        _eventLog = eventLog;
         _logger = logger;
     }
 
@@ -164,23 +161,6 @@ public class NDIController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting system status");
-            return StatusCode(500, new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Recent NDI monitoring events (read-only ring buffer)
-    /// </summary>
-    [HttpGet("events")]
-    public ActionResult<List<NdiEventLogEntry>> GetEvents([FromQuery] int limit = 100)
-    {
-        try
-        {
-            return Ok(_eventLog.GetRecent(limit));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting NDI events");
             return StatusCode(500, new { error = ex.Message });
         }
     }
