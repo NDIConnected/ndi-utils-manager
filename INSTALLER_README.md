@@ -12,6 +12,7 @@ This document describes how to build and package the standalone desktop/tray ver
 - Standalone WinForms tray application (not a Windows Service)
 - **Self-contained** `.NET 9` publish for `win-x64` — **no separate .NET install** on target machines
 - Tray menu in English; disconnect balloon notifications removed
+- **Installer license aligned with NDI GPIO Panel:** MIT License + NDI SDK installer notice (see `LICENSE`, `INSTALLER-NOTICE.txt`)
 - Installer output: `Output\NDIManager-v3.0-Setup.exe`
 - Unified icon branding with `MAN_icon.ico` for installer, application, and tray
 
@@ -101,7 +102,10 @@ Result:
 ├── Processing.NDI.Lib.x64.dll
 ├── wwwroot\
 ├── ThirdPartyLicenses\
-└── License\
+└── Licenses\
+    ├── LICENSE
+    ├── INSTALLER-NOTICE.txt
+    └── THIRD_PARTY_LICENSES.txt
 ```
 
 User settings (HTTP port only): `%LocalAppData%\NDIManager\settings.json`

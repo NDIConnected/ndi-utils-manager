@@ -5,6 +5,8 @@
 #define MyAppVersion "3.0"
 #define MyAppPublisher "Vizrt NDI AB"
 #define MyAppExeName "NDIManager.exe"
+#define MyLicenseFile "License\LICENSE"
+#define MyDisclaimerFile "INSTALLER-NOTICE.txt"
 
 [Setup]
 AppId={{E7F3C4A9-8D2B-4F1E-9A3C-5B6D7E8F9A0B}
@@ -14,8 +16,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-LicenseFile=License\license.rtf
-InfoBeforeFile=License\internal-only.txt
+LicenseFile={#MyLicenseFile}
 OutputDir=Output
 OutputBaseFilename=NDIManager-v{#MyAppVersion}-Setup
 Compression=lzma2/max
@@ -35,9 +36,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Third-party licenses
 Source: "ThirdPartyLicenses\*"; DestDir: "{app}\ThirdPartyLicenses"; Flags: ignoreversion recursesubdirs createallsubdirs
-; License files
-Source: "License\license.rtf"; DestDir: "{app}\License"; Flags: ignoreversion
-Source: "License\internal-only.txt"; DestDir: "{app}\License"; Flags: ignoreversion
+; Installer notice (extracted for custom wizard page)
+Source: "{#MyDisclaimerFile}"; DestName: "INSTALLER-NOTICE.txt"; Flags: dontcopy
+; License files (same layout as NDI GPIO Panel)
+Source: "{#MyLicenseFile}"; DestDir: "{app}\Licenses"; DestName: "LICENSE"; Flags: ignoreversion
+Source: "{#MyDisclaimerFile}"; DestDir: "{app}\Licenses"; DestName: "INSTALLER-NOTICE.txt"; Flags: ignoreversion
+Source: "License\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}\Licenses"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\wwwroot"; Permissions: users-modify
@@ -62,6 +66,70 @@ Name: "startupicon"; Description: "Start NDI Manager automatically with Windows"
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch NDI Manager"; Flags: postinstall nowait skipifsilent
 
 [Code]
+var
+  DisclaimerPage: TWizardPage;
+  DisclaimerMemo: TNewMemo;
+  DisclaimerAcceptCheck: TNewCheckBox;
+
+function LoadDisclaimerText(): String;
+var
+  Filename: String;
+  AnsiText: AnsiString;
+begin
+  Filename := ExpandConstant('{tmp}\INSTALLER-NOTICE.txt');
+  if not LoadStringFromFile(Filename, AnsiText) then
+    Result := ''
+  else
+    Result := String(AnsiText);
+end;
+
+procedure DisclaimerAcceptClick(Sender: TObject);
+begin
+  WizardForm.NextButton.Enabled := DisclaimerAcceptCheck.Checked;
+end;
+
+procedure InitializeWizard;
+var
+  CheckTop: Integer;
+begin
+  DisclaimerPage := CreateCustomPage(
+    wpWelcome,
+    'Installer Notice',
+    'Read and accept this notice to continue. The MIT license agreement is on the next page.');
+
+  ExtractTemporaryFile('INSTALLER-NOTICE.txt');
+
+  CheckTop := DisclaimerPage.SurfaceHeight - ScaleY(26);
+
+  DisclaimerAcceptCheck := TNewCheckBox.Create(DisclaimerPage);
+  DisclaimerAcceptCheck.Parent := DisclaimerPage.Surface;
+  DisclaimerAcceptCheck.Caption := 'I have read and accept this notice';
+  DisclaimerAcceptCheck.Left := 0;
+  DisclaimerAcceptCheck.Top := CheckTop;
+  DisclaimerAcceptCheck.Width := DisclaimerPage.SurfaceWidth;
+  DisclaimerAcceptCheck.Height := ScaleY(17);
+  DisclaimerAcceptCheck.Anchors := [akLeft, akRight, akBottom];
+  DisclaimerAcceptCheck.Checked := False;
+  DisclaimerAcceptCheck.OnClick := @DisclaimerAcceptClick;
+
+  DisclaimerMemo := TNewMemo.Create(DisclaimerPage);
+  DisclaimerMemo.Parent := DisclaimerPage.Surface;
+  DisclaimerMemo.Left := 0;
+  DisclaimerMemo.Top := 0;
+  DisclaimerMemo.Width := DisclaimerPage.SurfaceWidth;
+  DisclaimerMemo.Height := CheckTop - ScaleY(10);
+  DisclaimerMemo.Anchors := [akLeft, akTop, akRight];
+  DisclaimerMemo.ReadOnly := True;
+  DisclaimerMemo.ScrollBars := ssVertical;
+  DisclaimerMemo.Text := LoadDisclaimerText();
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = DisclaimerPage.ID then
+    WizardForm.NextButton.Enabled := DisclaimerAcceptCheck.Checked;
+end;
+
 function InitializeUninstall(): Boolean;
 var
   ResultCode: Integer;

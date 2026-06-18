@@ -67,6 +67,14 @@ Details: [INSTALLER_README.md](INSTALLER_README.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
+## License
+
+Application source code is licensed under the [MIT License](License/LICENSE) (Copyright © 2026 Vizrt NDI AB), same as [NDI GPIO Panel](https://github.com/NDIConnected/ndi-gpio).
+
+The installer shows [INSTALLER-NOTICE.txt](INSTALLER-NOTICE.txt) (NDI SDK runtime and trademark notice), then the MIT license. Installed copies are placed under `{app}\Licenses\` together with [License/THIRD_PARTY_LICENSES.txt](License/THIRD_PARTY_LICENSES.txt) and [ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt](ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt).
+
+The bundled `Processing.NDI.Lib.x64.dll` is **not** covered by MIT; it is subject to the NDI SDK license from Vizrt NDI AB.
+
 ## Further documentation
 
 - [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) — **User manual** (installation, Web UI, connections, troubleshooting)

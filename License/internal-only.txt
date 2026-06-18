@@ -1,4 +1,0 @@
-CONFIDENTIALITY NOTICE
-This software is provided as an internal prototype for the Vizrt NDI AB only and is confidential.
-It must not be shared, distributed, or used outside the Vizrt NDI AB.
-By continuing, you acknowledge and agree to these terms
