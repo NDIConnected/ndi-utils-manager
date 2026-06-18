@@ -42,6 +42,7 @@ Full pipeline (frontend → `wwwroot` → publish → Inno Setup):
 
 ## Further documentation
 
+- [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) — **User manual** (installation, Web UI, connections, troubleshooting)
 - [DOCS/](DOCS/) — implementation notes and guides  
 - [CHANGELOG.md](CHANGELOG.md)
 
