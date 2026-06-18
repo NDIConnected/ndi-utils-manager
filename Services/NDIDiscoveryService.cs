@@ -1,7 +1,10 @@
 using NDIManager.Models;
+using NDIManager.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using NDIManager;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -18,14 +21,24 @@ public class NDIDiscoveryService : BackgroundService
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _senderEventCache;  // Cache of sender UUID -> event data
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _receiverEventCache;  // Cache of receiver UUID -> event data
     private readonly ILogger<NDIDiscoveryService> _logger;
+    private readonly NdiEventLogService _eventLog;
+    private readonly IHubContext<NdiHub>? _hubContext;
     private readonly System.Threading.Timer _discoveryTimer;
     private IntPtr _finderInstance = IntPtr.Zero;
+    private readonly string? _discoveryServerUrl;
+    private DateTime _lastDiscoveryAt = DateTime.UtcNow;
+
+    public event Action? SnapshotUpdated;
 
     public NDIDiscoveryService(
         ILogger<NDIDiscoveryService> logger,
         ILoggerFactory loggerFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        NdiEventLogService eventLog,
+        IHubContext<NdiHub>? hubContext = null)
     {
+        _eventLog = eventLog;
+        _hubContext = hubContext;
         _logger = logger;
         _senders = new ConcurrentDictionary<string, NDISenderInfo>();
         _receivers = new ConcurrentDictionary<string, NDIReceiverInfo>();
@@ -46,7 +59,8 @@ public class NDIDiscoveryService : BackgroundService
         _sendListener = new NDISendListener(sendLogger);
         _recvListener = new NDIRecvListener(recvLogger);
 
-        var discoveryUrl = ResolveDiscoveryServerUrl(configuration);
+        _discoveryServerUrl = ResolveDiscoveryServerUrl(configuration);
+        var discoveryUrl = _discoveryServerUrl;
         _logger.LogInformation(
             "NDI Discovery Server URL: {Url}",
             string.IsNullOrEmpty(discoveryUrl) ? "(SDK default — null p_url_address)" : discoveryUrl);
@@ -106,18 +120,9 @@ public class NDIDiscoveryService : BackgroundService
             _sendListener.WaitForSenders(0);
             var senders = _sendListener.GetSenders();
 
-            var senderEvents = _sendListener.GetEvents(0);
-            foreach (var evt in senderEvents)
-            {
-                if (string.IsNullOrEmpty(evt.SenderUuid))
-                    continue;
-
-                var eventData = _senderEventCache.GetOrAdd(evt.SenderUuid, _ => new Dictionary<string, string>());
-                lock (eventData)
-                {
-                    eventData[evt.EventName] = evt.EventValue;
-                }
-            }
+            // Drain immediately, then briefly wait so post-subscribe events are not missed.
+            CacheSenderEvents(_sendListener.GetEvents(0));
+            CacheSenderEvents(_sendListener.GetEvents(50));
 
             _senders.Clear();
             foreach (var sender in senders)
@@ -126,94 +131,7 @@ public class NDIDiscoveryService : BackgroundService
                 {
                     lock (eventData)
                     {
-                        if (eventData.TryGetValue("connected-receivers", out var connectionsStr) && int.TryParse(connectionsStr, out var connections))
-                        {
-                            sender.ConnectionCount = connections;
-                        }
-
-                        if (eventData.TryGetValue("video-resolution", out var resolutionStr))
-                        {
-                            var resolution = resolutionStr.Split('x');
-                            if (resolution.Length == 2 && int.TryParse(resolution[0], out var width) && int.TryParse(resolution[1], out var height))
-                            {
-                                sender.Width = width;
-                                sender.Height = height;
-                            }
-                        }
-
-                        if (eventData.TryGetValue("video-frame-rate", out var frameRateStr))
-                        {
-                            var parts = frameRateStr.Split('/');
-                            if (parts.Length == 2 && int.TryParse(parts[0], out var n) && int.TryParse(parts[1], out var d))
-                            {
-                                sender.FrameRateN = n;
-                                sender.FrameRateD = d;
-                            }
-                        }
-
-                        if (eventData.TryGetValue("video-codec", out var videoCodec))
-                        {
-                            sender.VideoCodec = videoCodec.ToUpper();
-                        }
-
-                        if (eventData.TryGetValue("video-frame-type", out var frameType))
-                        {
-                            sender.VideoFrameType = frameType;
-                        }
-
-                        if (eventData.TryGetValue("video-has-alpha", out var hasAlphaStr) && bool.TryParse(hasAlphaStr, out var hasAlpha))
-                        {
-                            sender.VideoHasAlpha = hasAlpha;
-                        }
-                        if (eventData.TryGetValue("video-present", out var videoPresentStr) && bool.TryParse(videoPresentStr, out var videoPresent))
-                        {
-                            sender.VideoPresent = videoPresent;
-                        }
-
-                        if (eventData.TryGetValue("audio-codec", out var audioCodec))
-                        {
-                            sender.AudioCodec = audioCodec.ToUpper();
-                        }
-
-                        if (eventData.TryGetValue("audio-channels", out var channelsStr) && int.TryParse(channelsStr, out var channels))
-                        {
-                            sender.AudioChannels = channels;
-                        }
-
-                        if (eventData.TryGetValue("audio-sample-rate", out var sampleRateStr) && int.TryParse(sampleRateStr, out var sampleRate))
-                        {
-                            sender.AudioSampleRate = sampleRate;
-                        }
-                        if (eventData.TryGetValue("audio-present", out var audioPresentStr) && bool.TryParse(audioPresentStr, out var audioPresent))
-                        {
-                            sender.AudioPresent = audioPresent;
-                        }
-
-                        if (eventData.TryGetValue("sdk-version", out var sdkVersion))
-                        {
-                            sender.SdkVersion = sdkVersion;
-                        }
-
-                        if (eventData.TryGetValue("video-bytes-sent", out var videoBytesStr) && long.TryParse(videoBytesStr, out var videoBytes))
-                        {
-                            sender.BytesPerSecond = videoBytes;
-                        }
-
-                        if (eventData.TryGetValue("video-frames-dropped", out var droppedStr) && int.TryParse(droppedStr, out var dropped))
-                        {
-                            sender.DroppedFrames = dropped;
-                        }
-
-                        // Tally: p_value is the string "true" or "false" (not general bool parsing).
-                        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
-                            sender.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
-                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
-                            sender.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
-
-                        if (eventData.TryGetValue("web-control", out var webControl))
-                        {
-                            sender.WebControlUrl = webControl;
-                        }
+                        ApplySenderMonitoringEvents(sender, eventData);
                     }
                 }
 
@@ -253,32 +171,8 @@ public class NDIDiscoveryService : BackgroundService
             _logger.LogDebug("RecvListener connected={Connected}, receivers={Count}",
                 _recvListener.IsConnected, receivers.Count);
 
-            var recvEvents = _recvListener.GetEvents(0);
-            foreach (var evt in recvEvents)
-            {
-                if (evt.EventName == "source-name")
-                {
-                    if (string.IsNullOrWhiteSpace(evt.EventValue))
-                        _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
-                    else
-                        _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue.Trim();
-                }
-
-                if (evt.EventName == "connection-state" &&
-                    string.Equals(evt.EventValue, "disconnected", StringComparison.OrdinalIgnoreCase))
-                {
-                    _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
-                }
-
-                if (!string.IsNullOrEmpty(evt.ReceiverUuid))
-                {
-                    var eventData = _receiverEventCache.GetOrAdd(evt.ReceiverUuid, _ => new Dictionary<string, string>());
-                    lock (eventData)
-                    {
-                        eventData[evt.EventName] = evt.EventValue;
-                    }
-                }
-            }
+            CacheReceiverEvents(_recvListener.GetEvents(0));
+            CacheReceiverEvents(_recvListener.GetEvents(50));
 
             SyncReceiverSourceNamesFromEventCache();
 
@@ -288,99 +182,11 @@ public class NDIDiscoveryService : BackgroundService
             {
                 ApplyReceiverConnectionFromEvents(receiver);
 
-                // Populate receiver technical properties from cached event data
                 if (!string.IsNullOrEmpty(receiver.Id) && _receiverEventCache.TryGetValue(receiver.Id, out var eventData))
                 {
                     lock (eventData)
                     {
-                        // Parse video resolution
-                        if (eventData.TryGetValue("video-resolution", out var resolutionStr))
-                        {
-                            var resolution = resolutionStr.Split('x');
-                            if (resolution.Length == 2 && int.TryParse(resolution[0], out var width) && int.TryParse(resolution[1], out var height))
-                            {
-                                receiver.Width = width;
-                                receiver.Height = height;
-                            }
-                        }
-
-                        // Parse video frame rate
-                        if (eventData.TryGetValue("video-frame-rate", out var frameRateStr))
-                        {
-                            var parts = frameRateStr.Split('/');
-                            if (parts.Length == 2 && int.TryParse(parts[0], out var n) && int.TryParse(parts[1], out var d))
-                            {
-                                receiver.FrameRateN = n;
-                                receiver.FrameRateD = d;
-                            }
-                        }
-
-                        // Parse video codec
-                        if (eventData.TryGetValue("video-codec", out var videoCodec))
-                        {
-                            receiver.VideoCodec = videoCodec.ToUpper();
-                        }
-
-                        // Parse video frame type
-                        if (eventData.TryGetValue("video-frame-type", out var frameType))
-                        {
-                            receiver.VideoFrameType = frameType;
-                        }
-
-                        // Parse video has alpha
-                        if (eventData.TryGetValue("video-has-alpha", out var hasAlphaStr) && bool.TryParse(hasAlphaStr, out var hasAlpha))
-                        {
-                            receiver.VideoHasAlpha = hasAlpha;
-                        }
-                        if (eventData.TryGetValue("video-present", out var videoPresentStr) && bool.TryParse(videoPresentStr, out var videoPresent))
-                        {
-                            receiver.VideoPresent = videoPresent;
-                        }
-
-                        // Parse audio codec
-                        if (eventData.TryGetValue("audio-codec", out var audioCodec))
-                        {
-                            receiver.AudioCodec = audioCodec.ToUpper();
-                        }
-
-                        // Parse audio channels
-                        if (eventData.TryGetValue("audio-channels", out var channelsStr) && int.TryParse(channelsStr, out var channels))
-                        {
-                            receiver.AudioChannels = channels;
-                        }
-
-                        // Parse audio sample rate
-                        if (eventData.TryGetValue("audio-sample-rate", out var sampleRateStr) && int.TryParse(sampleRateStr, out var sampleRate))
-                        {
-                            receiver.AudioSampleRate = sampleRate;
-                        }
-                        if (eventData.TryGetValue("audio-present", out var audioPresentStr) && bool.TryParse(audioPresentStr, out var audioPresent))
-                        {
-                            receiver.AudioPresent = audioPresent;
-                        }
-
-                        // Parse SDK version
-                        if (eventData.TryGetValue("sdk-version", out var sdkVersion))
-                        {
-                            receiver.SdkVersion = sdkVersion;
-                        }
-
-                        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
-                            receiver.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
-                        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
-                            receiver.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
-
-                        // Parse web control URL
-                        if (eventData.TryGetValue("web-control", out var webControl))
-                        {
-                            receiver.WebControlUrl = webControl;
-                        }
-
-                        // Parse dropped frames
-                        if (eventData.TryGetValue("video-frames-dropped", out var droppedStr) && int.TryParse(droppedStr, out var dropped))
-                        {
-                            receiver.DroppedFrames = dropped;
-                        }
+                        ApplyReceiverMonitoringEvents(receiver, eventData);
                     }
                 }
 
@@ -388,11 +194,92 @@ public class NDIDiscoveryService : BackgroundService
             }
 
             _logger.LogDebug($"Discovered {receivers.Count} NDI receivers");
+
+            PublishSnapshotUpdate();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during NDI discovery");
         }
+    }
+
+    public NdiSystemStatus GetSystemStatus()
+    {
+        var snapshot = GetAggregatedSnapshot();
+        return BuildSystemStatus(snapshot);
+    }
+
+    public NdiBulkOperationResponse BulkDisconnectReceivers(IEnumerable<string> receiverUuids)
+    {
+        var response = new NdiBulkOperationResponse();
+        foreach (var uuid in receiverUuids.Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            response.Requested++;
+            if (DisconnectReceiver(uuid))
+                response.Succeeded++;
+            else
+                response.Errors.Add(uuid);
+        }
+        return response;
+    }
+
+    private NdiSystemStatus BuildSystemStatus(NDIAggregatedSnapshot snapshot)
+    {
+        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "2.9.0";
+        var health = "ok";
+        if (!_sendListener.IsConnected && !_recvListener.IsConnected)
+            health = "error";
+        else if (!_sendListener.IsConnected || !_recvListener.IsConnected)
+            health = "degraded";
+        else if (snapshot.Senders.Count + snapshot.Receivers.Count == 0)
+            health = "idle";
+
+        return new NdiSystemStatus
+        {
+            AppVersion = version,
+            ServerTime = DateTime.UtcNow,
+            DiscoveryServerUrl = _discoveryServerUrl ?? "(SDK default)",
+            SendListenerConnected = _sendListener.IsConnected,
+            RecvListenerConnected = _recvListener.IsConnected,
+            SendListenerServerUrl = _sendListener.ServerUrl,
+            RecvListenerServerUrl = _recvListener.ServerUrl,
+            FinderAvailable = _finderInstance != IntPtr.Zero,
+            SenderCount = snapshot.Senders.Count,
+            ReceiverCount = snapshot.Receivers.Count,
+            ConnectionCount = snapshot.Connections.Count,
+            LastDiscoveryAt = _lastDiscoveryAt,
+            Health = health,
+        };
+    }
+
+    private void PublishSnapshotUpdate()
+    {
+        _lastDiscoveryAt = DateTime.UtcNow;
+        try
+        {
+            SnapshotUpdated?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "SnapshotUpdated handler failed");
+        }
+
+        if (_hubContext == null)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var snapshot = GetAggregatedSnapshot();
+                var status = BuildSystemStatus(snapshot);
+                await _hubContext.Clients.All.SendAsync("snapshotUpdated", new { snapshot, status });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SignalR snapshot publish failed");
+            }
+        });
     }
 
     public List<NDISenderInfo> GetSenders()
@@ -460,6 +347,7 @@ public class NDIDiscoveryService : BackgroundService
                 EndpointName = sender.Name,
                 Role = role,
                 IsConnected = sender.ConnectionCount > 0,
+                ConnectionCount = sender.ConnectionCount,
                 IsStreaming = IsChannelStreaming(
                     sender.VideoPresent,
                     sender.AudioPresent,
@@ -483,7 +371,16 @@ public class NDIDiscoveryService : BackgroundService
                 TallyOnPreview = sender.TallyOnPreview,
                 SdkVersion = sender.SdkVersion,
                 WebControlUrl = sender.WebControlUrl,
-                DroppedFrames = sender.DroppedFrames
+                DroppedFrames = sender.DroppedFrames,
+                VideoFramesSent = sender.VideoFramesSent,
+                VideoBytesSent = sender.VideoBytesSent,
+                VideoColorPrimaries = sender.VideoColorPrimaries,
+                VideoTransferFunction = sender.VideoTransferFunction,
+                VideoMatrixCoefficients = sender.VideoMatrixCoefficients,
+                AudioFramesSent = sender.AudioFramesSent,
+                AudioBytesSent = sender.AudioBytesSent,
+                MetadataFramesSent = sender.MetadataFramesSent,
+                MetadataBytesSent = sender.MetadataBytesSent
             };
 
             device.Channels.Add(channel);
@@ -569,10 +466,18 @@ public class NDIDiscoveryService : BackgroundService
                 FrameRateN = receiver.FrameRateN,
                 FrameRateD = receiver.FrameRateD,
                 VideoCodec = receiver.VideoCodec,
+                VideoFrameType = receiver.VideoFrameType,
                 VideoHasAlpha = receiver.VideoHasAlpha,
+                VideoPresent = receiver.VideoPresent,
+                VideoReceiveMode = receiver.VideoReceiveMode,
+                VideoColorPrimaries = receiver.VideoColorPrimaries,
+                VideoTransferFunction = receiver.VideoTransferFunction,
+                VideoMatrixCoefficients = receiver.VideoMatrixCoefficients,
                 AudioCodec = receiver.AudioCodec,
                 AudioChannels = receiver.AudioChannels,
                 AudioSampleRate = receiver.AudioSampleRate,
+                AudioPresent = receiver.AudioPresent,
+                AudioReceiveMode = receiver.AudioReceiveMode,
                 TallyOnProgram = receiver.TallyOnProgram,
                 TallyOnPreview = receiver.TallyOnPreview,
                 SdkVersion = receiver.SdkVersion,
@@ -964,6 +869,247 @@ public class NDIDiscoveryService : BackgroundService
         }
 
         return safeAddress;
+    }
+
+    private void CacheSenderEvents(List<NDISenderEvent> events)
+    {
+        foreach (var evt in events)
+        {
+            if (string.IsNullOrEmpty(evt.SenderUuid))
+                continue;
+
+            var eventData = _senderEventCache.GetOrAdd(
+                evt.SenderUuid,
+                _ => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+
+            var key = evt.EventName?.Trim();
+            if (string.IsNullOrEmpty(key))
+                continue;
+
+            lock (eventData)
+            {
+                eventData[key] = evt.EventValue ?? string.Empty;
+            }
+
+            _eventLog.Add("SendListener", evt.SenderUuid, key, evt.EventValue ?? string.Empty);
+        }
+    }
+
+    private void CacheReceiverEvents(List<NDIReceiverEvent> events)
+    {
+        foreach (var evt in events)
+        {
+            if (string.IsNullOrEmpty(evt.ReceiverUuid))
+                continue;
+
+            if (string.Equals(evt.EventName, "source-name", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(evt.EventValue))
+                    _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
+                else
+                    _receiverSourceNames[evt.ReceiverUuid] = evt.EventValue.Trim();
+            }
+
+            if (string.Equals(evt.EventName, "connection-state", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(evt.EventValue, "disconnected", StringComparison.OrdinalIgnoreCase))
+            {
+                _receiverSourceNames.TryRemove(evt.ReceiverUuid, out _);
+            }
+
+            var eventData = _receiverEventCache.GetOrAdd(
+                evt.ReceiverUuid,
+                _ => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+
+            var key = evt.EventName?.Trim();
+            if (string.IsNullOrEmpty(key))
+                continue;
+
+            lock (eventData)
+            {
+                eventData[key] = evt.EventValue ?? string.Empty;
+            }
+
+            _eventLog.Add("RecvListener", evt.ReceiverUuid, key, evt.EventValue ?? string.Empty);
+        }
+    }
+
+    private static void ApplyReceiverMonitoringEvents(NDIReceiverInfo receiver, Dictionary<string, string> eventData)
+    {
+        if (eventData.TryGetValue("video-resolution", out var resolutionStr))
+        {
+            var resolution = resolutionStr.Split('x');
+            if (resolution.Length == 2 && int.TryParse(resolution[0], out var width) && int.TryParse(resolution[1], out var height))
+            {
+                receiver.Width = width;
+                receiver.Height = height;
+            }
+        }
+
+        if (eventData.TryGetValue("video-frame-rate", out var frameRateStr))
+        {
+            var parts = frameRateStr.Split('/');
+            if (parts.Length == 2 && int.TryParse(parts[0], out var n) && int.TryParse(parts[1], out var d))
+            {
+                receiver.FrameRateN = n;
+                receiver.FrameRateD = d;
+            }
+        }
+
+        if (eventData.TryGetValue("video-codec", out var videoCodec))
+            receiver.VideoCodec = videoCodec.ToUpper();
+
+        if (eventData.TryGetValue("video-frame-type", out var frameType))
+            receiver.VideoFrameType = frameType;
+
+        if (eventData.TryGetValue("video-has-alpha", out var hasAlphaStr))
+            receiver.VideoHasAlpha = NdiStringUtil.IsNdiTrueString(hasAlphaStr);
+
+        if (eventData.TryGetValue("video-present", out var videoPresentStr))
+            receiver.VideoPresent = NdiStringUtil.IsNdiTrueString(videoPresentStr);
+
+        if (eventData.TryGetValue("video-receive-mode", out var videoReceiveMode))
+            receiver.VideoReceiveMode = videoReceiveMode.Trim();
+
+        if (eventData.TryGetValue("video-color-primaries", out var colorPrimaries))
+            receiver.VideoColorPrimaries = colorPrimaries.Trim();
+
+        if (eventData.TryGetValue("video-transfer-function", out var transferFunction))
+            receiver.VideoTransferFunction = transferFunction.Trim();
+
+        if (eventData.TryGetValue("video-matrix-coefficients", out var matrixCoefficients))
+            receiver.VideoMatrixCoefficients = matrixCoefficients.Trim();
+
+        if (eventData.TryGetValue("audio-codec", out var audioCodec))
+            receiver.AudioCodec = audioCodec.ToUpper();
+
+        if (eventData.TryGetValue("audio-channels", out var channelsStr) && int.TryParse(channelsStr, out var audioChannels))
+            receiver.AudioChannels = audioChannels;
+
+        if (eventData.TryGetValue("audio-sample-rate", out var sampleRateStr) && int.TryParse(sampleRateStr, out var sampleRate))
+            receiver.AudioSampleRate = sampleRate;
+
+        if (eventData.TryGetValue("audio-present", out var audioPresentStr))
+            receiver.AudioPresent = NdiStringUtil.IsNdiTrueString(audioPresentStr);
+
+        if (eventData.TryGetValue("audio-receive-mode", out var audioReceiveMode))
+            receiver.AudioReceiveMode = audioReceiveMode.Trim();
+
+        if (eventData.TryGetValue("sdk-version", out var sdkVersion))
+            receiver.SdkVersion = sdkVersion;
+
+        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
+            receiver.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
+
+        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
+            receiver.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
+
+        if (eventData.TryGetValue("web-control", out var webControl))
+            receiver.WebControlUrl = webControl;
+
+        if (eventData.TryGetValue("video-frames-dropped", out var droppedStr) && int.TryParse(droppedStr, out var dropped))
+            receiver.DroppedFrames = dropped;
+    }
+
+    private static void ApplySenderMonitoringEvents(NDISenderInfo sender, Dictionary<string, string> eventData)
+    {
+        if (eventData.TryGetValue("connected-receivers", out var connectionsStr) &&
+            int.TryParse(connectionsStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var connections))
+            sender.ConnectionCount = connections;
+
+        if (eventData.TryGetValue("video-resolution", out var resolutionStr))
+        {
+            var resolution = resolutionStr.Split('x');
+            if (resolution.Length == 2 && int.TryParse(resolution[0], out var width) && int.TryParse(resolution[1], out var height))
+            {
+                sender.Width = width;
+                sender.Height = height;
+            }
+        }
+
+        if (eventData.TryGetValue("video-frame-rate", out var frameRateStr))
+        {
+            var parts = frameRateStr.Split('/');
+            if (parts.Length == 2 && int.TryParse(parts[0], out var n) && int.TryParse(parts[1], out var d))
+            {
+                sender.FrameRateN = n;
+                sender.FrameRateD = d;
+            }
+        }
+
+        if (eventData.TryGetValue("video-codec", out var videoCodec))
+            sender.VideoCodec = videoCodec.ToUpper();
+
+        if (eventData.TryGetValue("video-frame-type", out var frameType))
+            sender.VideoFrameType = frameType;
+
+        if (eventData.TryGetValue("video-has-alpha", out var hasAlphaStr))
+            sender.VideoHasAlpha = NdiStringUtil.IsNdiTrueString(hasAlphaStr);
+
+        if (eventData.TryGetValue("video-present", out var videoPresentStr))
+            sender.VideoPresent = NdiStringUtil.IsNdiTrueString(videoPresentStr);
+
+        if (eventData.TryGetValue("audio-codec", out var audioCodec))
+            sender.AudioCodec = audioCodec.ToUpper();
+
+        if (eventData.TryGetValue("audio-channels", out var channelsStr) && int.TryParse(channelsStr, out var audioChannels))
+            sender.AudioChannels = audioChannels;
+
+        if (eventData.TryGetValue("audio-sample-rate", out var sampleRateStr) && int.TryParse(sampleRateStr, out var sampleRate))
+            sender.AudioSampleRate = sampleRate;
+
+        if (eventData.TryGetValue("audio-present", out var audioPresentStr))
+            sender.AudioPresent = NdiStringUtil.IsNdiTrueString(audioPresentStr);
+
+        if (eventData.TryGetValue("sdk-version", out var sdkVersion))
+            sender.SdkVersion = sdkVersion;
+
+        if (eventData.TryGetValue("video-frames-sent", out var videoFramesStr) &&
+            long.TryParse(videoFramesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var videoFrames))
+            sender.VideoFramesSent = videoFrames;
+
+        if (eventData.TryGetValue("video-bytes-sent", out var videoBytesStr) &&
+            long.TryParse(videoBytesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var videoBytes))
+        {
+            sender.VideoBytesSent = videoBytes;
+            sender.BytesPerSecond = videoBytes;
+        }
+
+        if (eventData.TryGetValue("video-color-primaries", out var colorPrimaries))
+            sender.VideoColorPrimaries = colorPrimaries.Trim();
+
+        if (eventData.TryGetValue("video-transfer-function", out var transferFunction))
+            sender.VideoTransferFunction = transferFunction.Trim();
+
+        if (eventData.TryGetValue("video-matrix-coefficients", out var matrixCoefficients))
+            sender.VideoMatrixCoefficients = matrixCoefficients.Trim();
+
+        if (eventData.TryGetValue("audio-frames-sent", out var audioFramesStr) &&
+            long.TryParse(audioFramesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var audioFrames))
+            sender.AudioFramesSent = audioFrames;
+
+        if (eventData.TryGetValue("audio-bytes-sent", out var audioBytesStr) &&
+            long.TryParse(audioBytesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var audioBytes))
+            sender.AudioBytesSent = audioBytes;
+
+        if (eventData.TryGetValue("metadata-frames-sent", out var metadataFramesStr) &&
+            long.TryParse(metadataFramesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var metadataFrames))
+            sender.MetadataFramesSent = metadataFrames;
+
+        if (eventData.TryGetValue("metadata-bytes-sent", out var metadataBytesStr) &&
+            long.TryParse(metadataBytesStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var metadataBytes))
+            sender.MetadataBytesSent = metadataBytes;
+
+        if (eventData.TryGetValue("video-frames-dropped", out var droppedStr) && int.TryParse(droppedStr, out var dropped))
+            sender.DroppedFrames = dropped;
+
+        if (eventData.TryGetValue("tally-on-program", out var pgmStr))
+            sender.TallyOnProgram = NdiStringUtil.IsNdiTrueString(pgmStr);
+
+        if (eventData.TryGetValue("tally-on-preview", out var pvwStr))
+            sender.TallyOnPreview = NdiStringUtil.IsNdiTrueString(pvwStr);
+
+        if (eventData.TryGetValue("web-control", out var webControl))
+            sender.WebControlUrl = webControl;
     }
 
     private static void UpdateDeviceTechnicalSummaries(NDIMultiDevice device)

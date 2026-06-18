@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Text.Json;
+using NDIManager.Hubs;
+using NDIManager.Models;
 using NDIManager.Services;
 
 namespace NDIManager;
@@ -18,6 +20,15 @@ public class TrayApplicationContext : ApplicationContext
 
     private ToolStripMenuItem? _portMenuItem;
     private ToolStripMenuItem? _statusMenuItem;
+    private ToolStripMenuItem? _discoveryMenuItem;
+
+    private NDIDiscoveryService? _discoveryService;
+    private readonly Dictionary<string, string> _lastReceiverSources = new(StringComparer.OrdinalIgnoreCase);
+    private Icon? _iconGreen;
+    private Icon? _iconYellow;
+    private Icon? _iconRed;
+    private string _lastHealth = "unknown";
+    private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
     public TrayApplicationContext(string[] args)
     {
@@ -28,10 +39,14 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Icon = LoadTrayIcon(),
-            Text = $"NDI Manager - Port {_currentPort}",
+            Text = $"NDI Manager - Porta {_currentPort}",
             Visible = true,
             ContextMenuStrip = BuildContextMenu()
         };
+
+        _iconGreen = CreateColoredTrayIcon(Color.FromArgb(34, 197, 94));
+        _iconYellow = CreateColoredTrayIcon(Color.FromArgb(234, 179, 8));
+        _iconRed = CreateColoredTrayIcon(Color.FromArgb(239, 68, 68));
 
         _trayIcon.DoubleClick += (_, _) => OpenWebUI();
 
@@ -44,7 +59,7 @@ public class TrayApplicationContext : ApplicationContext
         menu.Renderer = new ToolStripProfessionalRenderer(new DarkColorTable());
 
         // Open Web UI (bold = default action)
-        var openItem = new ToolStripMenuItem("Open Web UI");
+        var openItem = new ToolStripMenuItem("Apri Web UI");
         openItem.Font = new Font(openItem.Font, FontStyle.Bold);
         openItem.Click += (_, _) => OpenWebUI();
         menu.Items.Add(openItem);
@@ -52,21 +67,35 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         // Status
-        _statusMenuItem = new ToolStripMenuItem("Status: Starting...")
+        _statusMenuItem = new ToolStripMenuItem("Stato: avvio...")
         {
             Enabled = false
         };
         menu.Items.Add(_statusMenuItem);
 
+        _discoveryMenuItem = new ToolStripMenuItem("Discovery Server: —")
+        {
+            Enabled = false
+        };
+        menu.Items.Add(_discoveryMenuItem);
+
         // Port
-        _portMenuItem = new ToolStripMenuItem($"Port: {_currentPort}");
+        _portMenuItem = new ToolStripMenuItem($"Porta: {_currentPort}");
         _portMenuItem.Click += (_, _) => ChangePort();
         menu.Items.Add(_portMenuItem);
+
+        var restartItem = new ToolStripMenuItem("Riavvia servizio");
+        restartItem.Click += (_, _) => _ = RestartWebServerAsync();
+        menu.Items.Add(restartItem);
+
+        var logsItem = new ToolStripMenuItem("Apri cartella dati");
+        logsItem.Click += (_, _) => OpenDataFolder();
+        menu.Items.Add(logsItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
         // Exit
-        var exitItem = new ToolStripMenuItem("Exit");
+        var exitItem = new ToolStripMenuItem("Esci");
         exitItem.Click += (_, _) => ExitApplication();
         menu.Items.Add(exitItem);
 
@@ -98,6 +127,9 @@ public class TrayApplicationContext : ApplicationContext
                 });
             });
 
+            builder.Services.AddSingleton<NdiEventLogService>();
+            builder.Services.AddSignalR();
+
             builder.Services.AddSingleton<NDIDiscoveryService>();
             builder.Services.AddHostedService<NDIDiscoveryService>(
                 sp => sp.GetRequiredService<NDIDiscoveryService>());
@@ -121,7 +153,11 @@ public class TrayApplicationContext : ApplicationContext
             _webApp.UseWebSockets();
             _webApp.UseAuthorization();
             _webApp.MapControllers();
+            _webApp.MapHub<NdiHub>("/hubs/ndi");
             _webApp.MapFallbackToFile("index.html");
+
+            _discoveryService = _webApp.Services.GetRequiredService<NDIDiscoveryService>();
+            _discoveryService.SnapshotUpdated += OnDiscoverySnapshotUpdated;
 
             UpdateStatus(true);
 
@@ -157,6 +193,12 @@ public class TrayApplicationContext : ApplicationContext
             _cts = null;
         }
 
+        if (_discoveryService != null)
+        {
+            _discoveryService.SnapshotUpdated -= OnDiscoverySnapshotUpdated;
+            _discoveryService = null;
+        }
+
         if (_webApp != null)
         {
             try
@@ -186,6 +228,90 @@ public class TrayApplicationContext : ApplicationContext
         _ = StartWebServerAsync();
     }
 
+    private void OnDiscoverySnapshotUpdated()
+    {
+        if (_discoveryService == null)
+            return;
+
+        try
+        {
+            var status = _discoveryService.GetSystemStatus();
+            UpdateTrayFromStatus(status);
+
+            var snapshot = _discoveryService.GetAggregatedSnapshot();
+            foreach (var receiver in snapshot.Receivers)
+            {
+                foreach (var channel in receiver.Channels)
+                {
+                    if (string.IsNullOrEmpty(channel.EndpointUuid))
+                        continue;
+
+                    var current = channel.CurrentSource ?? string.Empty;
+                    if (_lastReceiverSources.TryGetValue(channel.EndpointUuid, out var previous))
+                    {
+                        if (!string.IsNullOrEmpty(previous) && string.IsNullOrEmpty(current))
+                        {
+                            _trayIcon.ShowBalloonTip(
+                                4000,
+                                "NDI Manager — source persa",
+                                $"{channel.EndpointName}: {previous}",
+                                ToolTipIcon.Warning);
+                        }
+                    }
+
+                    _lastReceiverSources[channel.EndpointUuid] = current;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore tray update errors.
+        }
+    }
+
+    private void UpdateTrayFromStatus(NdiSystemStatus status)
+    {
+        if (_uiContext != null && SynchronizationContext.Current != _uiContext)
+        {
+            _uiContext.Post(_ => UpdateTrayFromStatus(status), null);
+            return;
+        }
+
+        _lastHealth = status.Health;
+
+        if (_statusMenuItem != null)
+        {
+            _statusMenuItem.Text = status.Health switch
+            {
+                "ok" => $"Stato: OK · {status.SenderCount} snd · {status.ReceiverCount} rcv",
+                "idle" => $"Stato: in attesa NDI · {status.SenderCount} snd · {status.ReceiverCount} rcv",
+                "degraded" => "Stato: listener parziale",
+                "error" => "Stato: errore listener",
+                _ => "Stato: sconosciuto",
+            };
+        }
+
+        if (_discoveryMenuItem != null)
+        {
+            var send = status.SendListenerConnected ? "send OK" : "send OFF";
+            var recv = status.RecvListenerConnected ? "recv OK" : "recv OFF";
+            _discoveryMenuItem.Text = $"Discovery: {send} · {recv} · {status.DiscoveryServerUrl}";
+        }
+
+        _trayIcon.Icon = status.Health switch
+        {
+            "ok" => _iconGreen ?? _trayIcon.Icon,
+            "idle" => _iconYellow ?? _trayIcon.Icon,
+            "degraded" => _iconYellow ?? _trayIcon.Icon,
+            "error" => _iconRed ?? _trayIcon.Icon,
+            _ => LoadTrayIcon(),
+        };
+
+        _trayIcon.Text = _serverRunning
+            ? $"NDI Manager — http://localhost:{_currentPort} ({status.Health})"
+            : "NDI Manager — fermato";
+    }
+
     private void UpdateStatus(bool running)
     {
         _serverRunning = running;
@@ -193,18 +319,29 @@ public class TrayApplicationContext : ApplicationContext
         if (_statusMenuItem != null)
         {
             _statusMenuItem.Text = running
-                ? $"Status: Running"
-                : "Status: Stopped";
+                ? "Stato: in esecuzione"
+                : "Stato: fermato";
         }
 
         _trayIcon.Text = running
-            ? $"NDI Manager - http://localhost:{_currentPort}"
-            : "NDI Manager - Stopped";
+            ? $"NDI Manager — http://localhost:{_currentPort}"
+            : "NDI Manager — fermato";
     }
 
     #endregion
 
     #region Menu Actions
+
+    private void OpenDataFolder()
+    {
+        var folder = Path.GetDirectoryName(_settingsPath) ?? InitSettingsPath();
+        Directory.CreateDirectory(folder);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = folder,
+            UseShellExecute = true
+        });
+    }
 
     private void OpenWebUI()
     {
@@ -235,7 +372,7 @@ public class TrayApplicationContext : ApplicationContext
             SavePort(_currentPort);
 
             if (_portMenuItem != null)
-                _portMenuItem.Text = $"Port: {_currentPort}";
+                _portMenuItem.Text = $"Porta: {_currentPort}";
 
             _ = RestartWebServerAsync();
         }
@@ -309,6 +446,32 @@ public class TrayApplicationContext : ApplicationContext
         return CreateFallbackTrayIcon();
     }
 
+    private static Icon CreateColoredTrayIcon(Color accent)
+    {
+        var bmp = new Bitmap(32, 32);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+            using var bgBrush = new SolidBrush(accent);
+            g.FillEllipse(bgBrush, 1, 1, 30, 30);
+
+            using var font = new Font("Segoe UI", 15, FontStyle.Bold);
+            using var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center
+            };
+            g.DrawString("N", font, Brushes.White, new RectangleF(0, -1, 32, 32), sf);
+        }
+
+        var hIcon = bmp.GetHicon();
+        var icon = (Icon)Icon.FromHandle(hIcon).Clone();
+        DestroyIcon(hIcon);
+        return icon;
+    }
+
     private static Icon CreateFallbackTrayIcon()
     {
         var bmp = new Bitmap(32, 32);
@@ -346,8 +509,14 @@ public class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            if (_discoveryService != null)
+                _discoveryService.SnapshotUpdated -= OnDiscoverySnapshotUpdated;
+
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
+            _iconGreen?.Dispose();
+            _iconYellow?.Dispose();
+            _iconRed?.Dispose();
             _cts?.Dispose();
         }
         base.Dispose(disposing);

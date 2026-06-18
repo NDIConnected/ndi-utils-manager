@@ -30,12 +30,17 @@ public class NDIReceiverInfo
     public string VideoFrameType { get; set; } = string.Empty;
     public bool VideoHasAlpha { get; set; }
     public bool VideoPresent { get; set; }
+    public string VideoReceiveMode { get; set; } = string.Empty;
+    public string VideoColorPrimaries { get; set; } = string.Empty;
+    public string VideoTransferFunction { get; set; } = string.Empty;
+    public string VideoMatrixCoefficients { get; set; } = string.Empty;
 
     // Audio properties (from source)
     public string AudioCodec { get; set; } = string.Empty;
     public int AudioChannels { get; set; }
     public int AudioSampleRate { get; set; }
     public bool AudioPresent { get; set; }
+    public string AudioReceiveMode { get; set; } = string.Empty;
 
     // General properties
     public string SdkVersion { get; set; } = string.Empty;

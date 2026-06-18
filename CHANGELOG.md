@@ -1,5 +1,27 @@
 # NDI Manager 6.3 - Changelog
 
+## [Version 2.9] - 2026-06-16
+
+### Web UI
+
+- Full UX refresh: toast notifications, Discovery status pill, Canvas / Table / Events tabs, metrics legend, channel detail drawer.
+- SignalR push with polling fallback; NDI events panel; host layout presets and bulk disconnect.
+- Edge confirmed (green) vs pending (yellow); auto-layout and density toggle.
+- **Dropped frames** on sender and receiver nodes and stats panels.
+- English UI throughout; removed duplicate “RX connected” label on sender connectors.
+- Fixed React infinite re-render causing blank screen after load.
+
+### Backend
+
+- `/api/ndi/status`, `/api/ndi/events`, `/api/ndi/disconnect-bulk`; SignalR hub `/hubs/ndi`.
+- Tray icon health colors, discovery menu, restart service, balloon on source lost.
+
+### Desktop / installer
+
+- Application version **2.9.0**; installer **2.9** (`NDIManager-v2.9-Setup.exe`).
+
+---
+
 ## [Version 2.8] - 2026-06-16
 
 ### Device aggregation

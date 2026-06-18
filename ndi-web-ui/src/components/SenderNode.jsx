@@ -1,5 +1,7 @@
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
+import { formatCount, channelStat } from '../utils/formatStats';
+import SenderStatsSections from './SenderStatsSections';
 
 const tallyChip = {
   pgm: {
@@ -23,6 +25,20 @@ const tallyChip = {
     lineHeight: 1.2,
   },
 };
+
+function channelHealthWarning(channel) {
+  if ((channel?.droppedFrames ?? 0) > 0) return 'Dropped frames';
+  if (channel?.isStreaming && !channel?.videoCodec && channel?.videoPresent) return 'Streaming without codec';
+  return '';
+}
+
+function sumDroppedFrames(channels) {
+  if (!Array.isArray(channels)) return 0;
+  return channels.reduce(
+    (acc, ch) => acc + (Number(channelStat(ch, 'droppedFrames')) || 0),
+    0,
+  );
+}
 
 function channelTallyProgram(c) {
   return c?.tallyOnProgram === true || c?.tallyOnProgram === 'true';
@@ -87,7 +103,7 @@ const getColorScheme = (isActive, connectionState) => {
 const styles = {
   node: (colorScheme) => ({
     position: 'relative',
-    overflow: 'hidden',
+    overflow: 'visible',
     padding: '12px 16px',
     boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
     borderRadius: '8px',
@@ -164,21 +180,37 @@ const styles = {
     fontWeight: '600',
     color: '#93c5fd',
   },
-  channelLabel: {
-    position: 'absolute',
-    transform: 'translateY(-50%)',
-    right: '22px',
+  channelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '8px',
+    minHeight: '24px',
+    marginTop: '8px',
+    marginLeft: '-16px',
+    marginRight: '-16px',
+    paddingLeft: '16px',
+    paddingRight: '8px',
+    position: 'relative',
+  },
+  channelRowLabel: {
     color: '#d1d5db',
     fontSize: '11px',
     fontFamily: 'monospace',
     lineHeight: 1,
     whiteSpace: 'nowrap',
-    maxWidth: '100px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    pointerEvents: 'none',
-    textAlign: 'right',
+    marginRight: '12px',
   },
+  channelHandle: (colorScheme) => ({
+    position: 'absolute',
+    right: '-7px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '12px',
+    height: '12px',
+    backgroundColor: colorScheme.handle,
+    border: `2px solid ${colorScheme.handleBorder}`,
+  }),
 };
 
 export default function SenderNode({ data }) {
@@ -238,24 +270,23 @@ export default function SenderNode({ data }) {
     const hiddenChannelCount = Math.max(0, channels.length - visibleChannels.length);
 
     const streamingChannels = channels.filter(c => c.isStreaming);
-    const channelsStartTop = isCollapsed ? 168 : 242;
-    const channelRowHeight = 24;
-    const expandButtonHeight = isCollapsed && hiddenChannelCount > 0 ? 40 : 0;
-    const nodeMinHeight = isCollapsed
-      ? channelsStartTop + (visibleChannels.length * channelRowHeight) + expandButtonHeight + 20
-      : Math.max(290, channelsStartTop + (channels.length * channelRowHeight) + 14);
+    const ndiConnectedRx = channels.reduce(
+      (acc, ch) => acc + (Number(ch?.connectionCount) || 0),
+      0,
+    );
+    const connectedRx = Math.max(ndiConnectedRx, Number(data.logicalConnectionCount) || 0);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
     const appDisplayName = data.applicationId !== 'unknown'
       ? data.applicationId
       : (inferredDeviceName || data.displayName || 'unknown');
     const appSubDisplayName = data.applicationId === 'unknown' ? inferredAppName : '';
-
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
+    const totalDroppedFrames = sumDroppedFrames(channels);
 
     return (
-      <div style={{ ...styles.node(COLOR_SCHEMES.green), minHeight: `${nodeMinHeight}px` }}>
+      <div style={styles.node(COLOR_SCHEMES.green)}>
         <style>{`
           @keyframes tallyPulse {
             0%, 100% { opacity: 1; }
@@ -315,8 +346,41 @@ export default function SenderNode({ data }) {
             <span style={styles.value}>{data.address || '-'}</span>
           </div>
           <div style={styles.infoRow}>
-            <span style={styles.label}>Streaming:</span>
+            <span style={styles.label}>Connected RX:</span>
+            <button
+              type="button"
+              className="nodrag nopan"
+              onClick={(e) => {
+                e.stopPropagation();
+                data?.onFocusConnections?.();
+              }}
+              style={{
+                ...styles.value,
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: connectedRx > 0 ? 'pointer' : 'default',
+                color: connectedRx > 0 ? '#93c5fd' : '#e5e7eb',
+                textDecoration: connectedRx > 0 ? 'underline' : 'none',
+              }}
+              title={connectedRx > 0 ? 'Highlight connections' : undefined}
+            >
+              {connectedRx}
+            </button>
+          </div>
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Active ch:</span>
             <span style={styles.value}>{`${streamingChannels.length}/${channels.length}`}</span>
+          </div>
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Dropped frames:</span>
+            <span style={{
+              ...styles.value,
+              color: totalDroppedFrames > 0 ? '#f87171' : undefined,
+            }}
+            >
+              {formatCount(totalDroppedFrames)}
+            </span>
           </div>
           {!isCollapsed && (
             <>
@@ -340,6 +404,55 @@ export default function SenderNode({ data }) {
           )}
         </div>
 
+        {visibleChannels.map((channel, idx) => {
+          const pgm = channelTallyProgram(channel);
+          const pvw = channelTallyPreview(channel);
+          const label = getChannelConnectorLabel(channel, idx);
+          const warning = channelHealthWarning(channel);
+          return (
+            <div
+              key={`out-row-${channel.channelId}-${idx}`}
+              style={{
+                ...styles.channelRow,
+                marginTop: idx === 0 ? '8px' : '2px',
+                cursor: 'pointer',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                data?.onChannelSelect?.(channel);
+              }}
+              title={warning || label}
+            >
+              {warning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
+              {(pgm || pvw) && (
+                <div style={{ display: 'flex', gap: '3px', pointerEvents: 'none' }}>
+                  {pgm && (
+                    <span style={{ ...tallyChip.pgm, animation: 'tallyPulse 1.5s ease-in-out infinite' }}>
+                      PGM
+                    </span>
+                  )}
+                  {pvw && <span style={tallyChip.pvw}>PVW</span>}
+                </div>
+              )}
+              <span style={styles.channelRowLabel}>{label}</span>
+              <Handle
+                id={`out-${channel.channelId}`}
+                type="source"
+                position={Position.Right}
+                style={styles.channelHandle(COLOR_SCHEMES.green)}
+                title={label}
+              />
+            </div>
+          );
+        })}
+
+        {!isCollapsed && (
+          <SenderStatsSections
+            channels={channels}
+            getChannelLabel={getChannelConnectorLabel}
+          />
+        )}
+
         {isCollapsed && hiddenChannelCount > 0 && (
           <button
             type="button"
@@ -359,7 +472,7 @@ export default function SenderNode({ data }) {
               cursor: 'pointer',
             }}
           >
-            +{hiddenChannelCount} canali — espandi
+            +{hiddenChannelCount} channels — expand
           </button>
         )}
 
@@ -382,70 +495,42 @@ export default function SenderNode({ data }) {
               cursor: 'pointer',
             }}
           >
-            comprimi
+            collapse
           </button>
         )}
-
-        {visibleChannels.map((channel, idx) => (
-          <Handle
-            key={`out-${channel.channelId}-${idx}`}
-            id={`out-${channel.channelId}`}
-            type="source"
-            position={Position.Right}
-            style={{
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-              width: '12px',
-              height: '12px',
-              backgroundColor: COLOR_SCHEMES.green.handle,
-              border: `2px solid ${COLOR_SCHEMES.green.handleBorder}`,
-            }}
-            title={getChannelConnectorLabel(channel, idx)}
-          />
-        ))}
-
-        {visibleChannels.map((channel, idx) => (
-          <div
-            key={`out-label-${channel.channelId}-${idx}`}
-            style={{
-              ...styles.channelLabel,
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-            }}
-            title={getChannelConnectorLabel(channel, idx)}
-          >
-            {getChannelConnectorLabel(channel, idx)}
-          </div>
-        ))}
-
-        {visibleChannels.map((channel, idx) => {
-          const pgm = channelTallyProgram(channel);
-          const pvw = channelTallyPreview(channel);
-          if (!pgm && !pvw) return null;
-          const top = `${channelsStartTop + (idx * channelRowHeight)}px`;
-          return (
-            <div
-              key={`out-tally-${channel.channelId}-${idx}`}
-              style={{
-                position: 'absolute',
-                transform: 'translateY(-50%)',
-                right: '128px',
-                top,
-                display: 'flex',
-                gap: '3px',
-                pointerEvents: 'none',
-              }}
-            >
-              {pgm && <span style={{ ...tallyChip.pgm, animation: 'tallyPulse 1.5s ease-in-out infinite' }}>PGM</span>}
-              {pvw && <span style={tallyChip.pvw}>PVW</span>}
-            </div>
-          );
-        })}
       </div>
     );
   }
 
   const { name, hostName, address, port, width, height, frameRate, videoCodec, audioCodec,
           audioChannels, audioSampleRate, connectionCount, status, connectionState,
-          groups, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames } = data;
+          groups, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames,
+          videoFramesSent, videoBytesSent, videoHasAlpha, videoColorPrimaries,
+          videoTransferFunction, videoMatrixCoefficients, audioFramesSent, audioBytesSent,
+          metadataFramesSent, metadataBytesSent } = data;
+
+  const statsChannel = {
+    connectionCount,
+    videoCodec,
+    width,
+    height,
+    frameRateN: data.frameRateN,
+    frameRateD: data.frameRateD,
+    frameRate: data.frameRate,
+    audioCodec,
+    audioChannels,
+    audioSampleRate,
+    videoFramesSent,
+    videoBytesSent,
+    videoHasAlpha,
+    videoColorPrimaries,
+    videoTransferFunction,
+    videoMatrixCoefficients,
+    audioFramesSent,
+    audioBytesSent,
+    metadataFramesSent,
+    metadataBytesSent,
+  };
 
   const isActive = status === 'Active';
   const colorScheme = getColorScheme(isActive, connectionState);
@@ -597,12 +682,16 @@ export default function SenderNode({ data }) {
           </div>
         )}
 
-        {droppedFrames > 0 && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Dropped:</span>
-            <span style={{ ...styles.value, color: '#f87171' }}>{droppedFrames}</span>
-          </div>
-        )}
+        <div style={styles.infoRow}>
+          <span style={styles.label}>Dropped frames:</span>
+          <span style={{
+            ...styles.value,
+            color: droppedFrames > 0 ? '#f87171' : undefined,
+          }}
+          >
+            {formatCount(droppedFrames)}
+          </span>
+        </div>
 
         {webControlUrl && (
           <div style={{ marginTop: '4px' }}>
@@ -613,6 +702,11 @@ export default function SenderNode({ data }) {
           </div>
         )}
       </div>
+
+      <SenderStatsSections
+        channels={[statsChannel]}
+        getChannelLabel={() => name || 'Output'}
+      />
 
       {/* Output Handle */}
       <Handle

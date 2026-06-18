@@ -36,6 +36,17 @@ public class NDISenderInfo
     public string BandwidthMBps => (BytesPerSecond / (1024.0 * 1024.0)).ToString("F2");
     public int DroppedFrames { get; set; }
 
+    // Sender monitoring (NDI Send Listener events)
+    public long VideoFramesSent { get; set; }
+    public long VideoBytesSent { get; set; }
+    public string VideoColorPrimaries { get; set; } = string.Empty;
+    public string VideoTransferFunction { get; set; } = string.Empty;
+    public string VideoMatrixCoefficients { get; set; } = string.Empty;
+    public long AudioFramesSent { get; set; }
+    public long AudioBytesSent { get; set; }
+    public long MetadataFramesSent { get; set; }
+    public long MetadataBytesSent { get; set; }
+
     // General properties
     public string SdkVersion { get; set; } = string.Empty;
     public string WebControlUrl { get; set; } = string.Empty;

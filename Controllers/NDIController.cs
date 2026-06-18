@@ -9,11 +9,16 @@ namespace NDIManager.Controllers;
 public class NDIController : ControllerBase
 {
     private readonly NDIDiscoveryService _discoveryService;
+    private readonly NdiEventLogService _eventLog;
     private readonly ILogger<NDIController> _logger;
 
-    public NDIController(NDIDiscoveryService discoveryService, ILogger<NDIController> logger)
+    public NDIController(
+        NDIDiscoveryService discoveryService,
+        NdiEventLogService eventLog,
+        ILogger<NDIController> logger)
     {
         _discoveryService = discoveryService;
+        _eventLog = eventLog;
         _logger = logger;
     }
 
@@ -147,17 +152,81 @@ public class NDIController : ControllerBase
     }
 
     /// <summary>
+    /// System status including Discovery Server listener health
+    /// </summary>
+    [HttpGet("status")]
+    public ActionResult<NdiSystemStatus> GetStatus()
+    {
+        try
+        {
+            return Ok(_discoveryService.GetSystemStatus());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting system status");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Recent NDI monitoring events (read-only ring buffer)
+    /// </summary>
+    [HttpGet("events")]
+    public ActionResult<List<NdiEventLogEntry>> GetEvents([FromQuery] int limit = 100)
+    {
+        try
+        {
+            return Ok(_eventLog.GetRecent(limit));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting NDI events");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Disconnect multiple receivers in one request
+    /// </summary>
+    [HttpPost("disconnect-bulk")]
+    public ActionResult<NdiBulkOperationResponse> DisconnectBulk([FromBody] NdiBulkDisconnectRequest request)
+    {
+        try
+        {
+            var uuids = request?.ReceiverUuids ?? new List<string>();
+            if (uuids.Count == 0)
+            {
+                return BadRequest(new NdiBulkOperationResponse
+                {
+                    Errors = { "At least one ReceiverUuid is required" }
+                });
+            }
+
+            var result = _discoveryService.BulkDisconnectReceivers(uuids);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during bulk disconnect");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Health check endpoint
     /// </summary>
     [HttpGet("health")]
     public ActionResult GetHealth()
     {
+        var status = _discoveryService.GetSystemStatus();
         return Ok(new
         {
-            status = "healthy",
-            timestamp = DateTime.Now,
-            senderCount = _discoveryService.GetSenders().Count,
-            receiverCount = _discoveryService.GetReceivers().Count
+            status = status.Health,
+            timestamp = DateTime.UtcNow,
+            senderCount = status.SenderCount,
+            receiverCount = status.ReceiverCount,
+            sendListenerConnected = status.SendListenerConnected,
+            recvListenerConnected = status.RecvListenerConnected,
         });
     }
 }

@@ -36,6 +36,7 @@ public class NDIMultiChannel
     public string EndpointName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty; // sender | receiver
     public bool IsConnected { get; set; }
+    public int ConnectionCount { get; set; }
     public bool IsStreaming { get; set; }
     public string? CurrentSource { get; set; }
     public string Address { get; set; } = string.Empty;
@@ -46,15 +47,29 @@ public class NDIMultiChannel
     public int FrameRateD { get; set; }
     public double FrameRate => FrameRateD > 0 ? (double)FrameRateN / FrameRateD : 0;
     public string VideoCodec { get; set; } = string.Empty;
+    public string VideoFrameType { get; set; } = string.Empty;
     public bool VideoHasAlpha { get; set; }
+    public bool VideoPresent { get; set; }
+    public string VideoReceiveMode { get; set; } = string.Empty;
     public string AudioCodec { get; set; } = string.Empty;
     public int AudioChannels { get; set; }
     public int AudioSampleRate { get; set; }
+    public bool AudioPresent { get; set; }
+    public string AudioReceiveMode { get; set; } = string.Empty;
     public bool TallyOnProgram { get; set; }
     public bool TallyOnPreview { get; set; }
     public string SdkVersion { get; set; } = string.Empty;
     public string WebControlUrl { get; set; } = string.Empty;
     public int DroppedFrames { get; set; }
+    public long VideoFramesSent { get; set; }
+    public long VideoBytesSent { get; set; }
+    public string VideoColorPrimaries { get; set; } = string.Empty;
+    public string VideoTransferFunction { get; set; } = string.Empty;
+    public string VideoMatrixCoefficients { get; set; } = string.Empty;
+    public long AudioFramesSent { get; set; }
+    public long AudioBytesSent { get; set; }
+    public long MetadataFramesSent { get; set; }
+    public long MetadataBytesSent { get; set; }
     public List<string> Streams { get; set; } = new();
     public List<string> Commands { get; set; } = new();
 }

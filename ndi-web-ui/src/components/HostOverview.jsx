@@ -97,7 +97,7 @@ export default function HostOverview({
     <aside style={panel.root}>
       <div style={panel.header}>Hosts</div>
       <div style={panel.hint}>
-        Raggruppa per macchina/applicazione. Seleziona un host per lavorare solo su quel sistema nel canvas.
+        Group by machine/application. Select a host to work on that system only in the canvas.
       </div>
       <div style={panel.list}>
         <button
@@ -105,7 +105,7 @@ export default function HostOverview({
           style={panel.allRow(!selectedHostKey)}
           onClick={() => onSelectHost(null)}
         >
-          <div style={panel.rowTitle}>Tutti gli host</div>
+          <div style={panel.rowTitle}>All hosts</div>
           <div style={panel.stats}>
             <StatChip label="sender dev." value={totalSenders} color="#065f46" />
             <StatChip label="recv dev." value={totalReceivers} color="#1e3a8a" />

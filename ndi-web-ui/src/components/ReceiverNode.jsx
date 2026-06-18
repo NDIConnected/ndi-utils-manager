@@ -1,10 +1,63 @@
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
+import { formatCount, channelStat } from '../utils/formatStats';
+import ReceiverStatsSections from './ReceiverStatsSections';
+
+const tallyChip = {
+  pgm: {
+    padding: '2px 4px',
+    borderRadius: '3px',
+    backgroundColor: '#dc2626',
+    color: 'white',
+    fontSize: '9px',
+    fontWeight: '700',
+    letterSpacing: '0.04em',
+    lineHeight: 1.2,
+  },
+  pvw: {
+    padding: '2px 4px',
+    borderRadius: '3px',
+    backgroundColor: '#16a34a',
+    color: 'white',
+    fontSize: '9px',
+    fontWeight: '700',
+    letterSpacing: '0.04em',
+    lineHeight: 1.2,
+  },
+};
+
+function channelHealthWarning(channel) {
+  if ((channel?.droppedFrames ?? 0) > 0) return 'Dropped frames';
+  if (channel?.isConnected && !channel?.currentSource) return 'Connected without source';
+  if (channel?.isStreaming && !channel?.videoCodec && channel?.videoPresent) return 'Streaming without codec';
+  return '';
+}
+
+function sumDroppedFrames(channels) {
+  if (!Array.isArray(channels)) return 0;
+  return channels.reduce(
+    (acc, ch) => acc + (Number(channelStat(ch, 'droppedFrames')) || 0),
+    0,
+  );
+}
+
+function channelTallyProgram(c) {
+  return c?.tallyOnProgram === true || c?.tallyOnProgram === 'true';
+}
+
+function channelTallyPreview(c) {
+  return c?.tallyOnPreview === true || c?.tallyOnPreview === 'true';
+}
+
+const RECEIVER_HANDLE = {
+  bg: '#3b82f6',
+  border: '#93c5fd',
+};
 
 const styles = {
   node: (isConnected) => ({
     position: 'relative',
-    overflow: 'hidden',
+    overflow: 'visible',
     padding: '12px 16px',
     boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
     borderRadius: '8px',
@@ -107,19 +160,47 @@ const styles = {
     fontStyle: 'italic',
     fontSize: '12px',
   },
-  channelLabel: {
-    position: 'absolute',
-    transform: 'translateY(-50%)',
-    left: '22px',
+  channelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: '8px',
+    minHeight: '24px',
+    marginTop: '8px',
+    marginLeft: '-16px',
+    marginRight: '-16px',
+    paddingLeft: '8px',
+    paddingRight: '16px',
+    position: 'relative',
+  },
+  channelRowLabel: {
     color: '#d1d5db',
     fontSize: '11px',
     fontFamily: 'monospace',
     lineHeight: 1,
     whiteSpace: 'nowrap',
-    maxWidth: '130px',
+    marginLeft: '12px',
+  },
+  channelSourceHint: {
+    flex: 1,
+    minWidth: 0,
+    color: '#6ee7b7',
+    fontSize: '10px',
+    fontFamily: 'monospace',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    pointerEvents: 'none',
+    whiteSpace: 'nowrap',
+    textAlign: 'right',
+  },
+  channelHandle: {
+    position: 'absolute',
+    left: '-7px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: '12px',
+    height: '12px',
+    backgroundColor: RECEIVER_HANDLE.bg,
+    border: `2px solid ${RECEIVER_HANDLE.border}`,
   },
 };
 
@@ -159,6 +240,13 @@ export default function ReceiverNode({ data }) {
     return `Input ${String(safe).padStart(2, '0')}`;
   };
 
+  const shortSource = (source) => {
+    const raw = (source || '').trim();
+    if (!raw) return '';
+    if (raw.length <= 22) return raw;
+    return `${raw.slice(0, 19)}…`;
+  };
+
   if (data?.isAggregated) {
     const channels = Array.isArray(data.channels) ? data.channels : [];
     const isCollapsed = data?.isCollapsed === true;
@@ -179,13 +267,8 @@ export default function ReceiverNode({ data }) {
     const visibleChannels = pickVisibleChannels();
     const hiddenChannelCount = Math.max(0, channels.length - visibleChannels.length);
 
-    const streamingChannels = channels.filter(c => c.isStreaming);
-    const channelsStartTop = isCollapsed ? 168 : 242;
-    const channelRowHeight = 24;
-    const expandButtonHeight = isCollapsed && hiddenChannelCount > 0 ? 40 : 0;
-    const nodeMinHeight = isCollapsed
-      ? channelsStartTop + (visibleChannels.length * channelRowHeight) + expandButtonHeight + 20
-      : Math.max(290, channelsStartTop + (channels.length * channelRowHeight) + 14);
+    const connectedChannels = channels.filter((c) => c.isConnected);
+    const streamingChannels = channels.filter((c) => c.isStreaming);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
     const appDisplayName = data.applicationId !== 'unknown'
@@ -193,14 +276,29 @@ export default function ReceiverNode({ data }) {
       : (inferredDeviceName || data.displayName || 'unknown');
     const appSubDisplayName = data.applicationId === 'unknown' ? inferredAppName : '';
 
+    const deviceTallyPgm = channels.some(channelTallyProgram);
+    const deviceTallyPvw = channels.some(channelTallyPreview);
+    const hasActivity = connectedChannels.length > 0 || streamingChannels.length > 0;
+    const totalDroppedFrames = sumDroppedFrames(channels);
+
     return (
-      <div style={{ ...styles.node(streamingChannels.length > 0), minHeight: `${nodeMinHeight}px` }}>
+      <div style={styles.node(hasActivity)}>
+        <style>{`
+          @keyframes tallyPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.55; }
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+          }
+        `}</style>
         <div style={styles.header}>
           <div style={styles.headerLeft}>
-            <div style={styles.indicator(streamingChannels.length > 0)} />
+            <div style={styles.indicator(hasActivity)} />
             <span>RECEIVER DEVICE</span>
           </div>
-          <span style={styles.badge(streamingChannels.length > 0)}>
+          <span style={styles.badge(hasActivity)}>
             {channels.length} ch
           </span>
         </div>
@@ -209,14 +307,79 @@ export default function ReceiverNode({ data }) {
         {appSubDisplayName && (
           <div style={styles.appSubValue}>{appSubDisplayName}</div>
         )}
+
+        {(deviceTallyPgm || deviceTallyPvw) && (
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+            {deviceTallyPgm && (
+              <div style={{
+                flex: 1,
+                padding: '3px 0',
+                borderRadius: '4px',
+                backgroundColor: '#dc2626',
+                color: 'white',
+                textAlign: 'center',
+                fontSize: '11px',
+                fontWeight: '700',
+                letterSpacing: '0.05em',
+                animation: 'tallyPulse 1.5s ease-in-out infinite',
+              }}>PGM</div>
+            )}
+            {deviceTallyPvw && (
+              <div style={{
+                flex: 1,
+                padding: '3px 0',
+                borderRadius: '4px',
+                backgroundColor: '#16a34a',
+                color: 'white',
+                textAlign: 'center',
+                fontSize: '11px',
+                fontWeight: '700',
+                letterSpacing: '0.05em',
+              }}>PVW</div>
+            )}
+          </div>
+        )}
+
         <div style={styles.infoGrid}>
           <div style={styles.infoRow}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '-'}</span>
           </div>
           <div style={styles.infoRow}>
+            <span style={styles.label}>Connected:</span>
+            <button
+              type="button"
+              className="nodrag nopan"
+              onClick={(e) => {
+                e.stopPropagation();
+                data?.onFocusConnections?.();
+              }}
+              style={{
+                ...styles.value,
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: connectedChannels.length > 0 ? 'pointer' : 'default',
+                color: connectedChannels.length > 0 ? '#93c5fd' : undefined,
+                textDecoration: connectedChannels.length > 0 ? 'underline' : 'none',
+              }}
+            >
+              {`${connectedChannels.length}/${channels.length}`}
+            </button>
+          </div>
+          <div style={styles.infoRow}>
             <span style={styles.label}>Streaming:</span>
             <span style={styles.value}>{`${streamingChannels.length}/${channels.length}`}</span>
+          </div>
+          <div style={styles.infoRow}>
+            <span style={styles.label}>Dropped frames:</span>
+            <span style={{
+              ...styles.value,
+              color: totalDroppedFrames > 0 ? '#f87171' : undefined,
+            }}
+            >
+              {formatCount(totalDroppedFrames)}
+            </span>
           </div>
           {!isCollapsed && (
             <>
@@ -232,13 +395,64 @@ export default function ReceiverNode({ data }) {
                 <span style={styles.label}>Res/FPS:</span>
                 <span style={styles.value}>{`${data.resolutionSummary || '-'} / ${data.frameRateSummary || '-'}`}</span>
               </div>
-              <div style={styles.infoRow}>
-                <span style={styles.label}>Ports:</span>
-                <span style={styles.value}>{data.portSummary || '-'}</span>
-              </div>
             </>
           )}
         </div>
+
+        {visibleChannels.map((channel, idx) => {
+          const pgm = channelTallyProgram(channel);
+          const pvw = channelTallyPreview(channel);
+          const label = getConnectionLabel(channel, idx);
+          const sourceHint = shortSource(channel.currentSource);
+          const warning = channelHealthWarning(channel);
+          return (
+            <div
+              key={`in-row-${channel.channelId}-${idx}`}
+              style={{
+                ...styles.channelRow,
+                marginTop: idx === 0 ? '8px' : '2px',
+                cursor: 'pointer',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                data?.onChannelSelect?.(channel);
+              }}
+              title={warning || channel.currentSource || label}
+            >
+              {warning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
+              <Handle
+                id={`in-${channel.channelId}`}
+                type="target"
+                position={Position.Left}
+                style={styles.channelHandle}
+                title={label}
+              />
+              <span style={styles.channelRowLabel}>{label}</span>
+              {(pgm || pvw) && (
+                <div style={{ display: 'flex', gap: '3px', pointerEvents: 'none' }}>
+                  {pgm && (
+                    <span style={{ ...tallyChip.pgm, animation: 'tallyPulse 1.5s ease-in-out infinite' }}>
+                      PGM
+                    </span>
+                  )}
+                  {pvw && <span style={tallyChip.pvw}>PVW</span>}
+                </div>
+              )}
+              {sourceHint && (
+                <span style={styles.channelSourceHint} title={channel.currentSource}>
+                  → {sourceHint}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
+        {!isCollapsed && (
+          <ReceiverStatsSections
+            channels={channels}
+            getChannelLabel={getConnectionLabel}
+          />
+        )}
 
         {isCollapsed && hiddenChannelCount > 0 && (
           <button
@@ -259,7 +473,7 @@ export default function ReceiverNode({ data }) {
               cursor: 'pointer',
             }}
           >
-            +{hiddenChannelCount} canali — espandi
+            +{hiddenChannelCount} channels — expand
           </button>
         )}
 
@@ -282,46 +496,48 @@ export default function ReceiverNode({ data }) {
               cursor: 'pointer',
             }}
           >
-            comprimi
+            collapse
           </button>
         )}
-
-        {visibleChannels.map((channel, idx) => (
-          <Handle
-            key={`in-${channel.channelId}-${idx}`}
-            id={`in-${channel.channelId}`}
-            type="target"
-            position={Position.Left}
-            style={{
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-              width: '12px',
-              height: '12px',
-              backgroundColor: '#3b82f6',
-              border: '2px solid #93c5fd',
-            }}
-            title={getConnectionLabel(channel, idx)}
-          />
-        ))}
-
-        {visibleChannels.map((channel, idx) => (
-          <div
-            key={`in-label-${channel.channelId}-${idx}`}
-            style={{
-              ...styles.channelLabel,
-              top: `${channelsStartTop + (idx * channelRowHeight)}px`,
-            }}
-            title={getConnectionLabel(channel, idx)}
-          >
-            {getConnectionLabel(channel, idx)}
-          </div>
-        ))}
       </div>
     );
   }
 
   const { name, hostName, address, currentSource, isConnected, status, width, height,
           frameRate, videoCodec, audioCodec, audioChannels, audioSampleRate,
-          streams, commands, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames } = data;
+          streams, commands, tallyOnProgram, tallyOnPreview, webControlUrl, droppedFrames,
+          videoFrameType, videoPresent, videoReceiveMode, videoHasAlpha,
+          videoColorPrimaries, videoTransferFunction, videoMatrixCoefficients,
+          audioPresent, audioReceiveMode, sdkVersion } = data;
+
+  const statsChannel = {
+    isConnected,
+    currentSource,
+    isStreaming: isConnected && !!currentSource,
+    sdkVersion,
+    webControlUrl,
+    videoPresent,
+    videoCodec,
+    width,
+    height,
+    frameRateN: data.frameRateN,
+    frameRateD: data.frameRateD,
+    frameRate,
+    videoFrameType,
+    videoReceiveMode,
+    videoHasAlpha,
+    videoColorPrimaries,
+    videoTransferFunction,
+    videoMatrixCoefficients,
+    droppedFrames,
+    audioPresent,
+    audioCodec,
+    audioChannels,
+    audioSampleRate,
+    audioReceiveMode,
+    streams,
+    commands,
+  };
 
   return (
     <div style={styles.node(isConnected)}>
@@ -336,19 +552,6 @@ export default function ReceiverNode({ data }) {
         }
       `}</style>
 
-      {/* Input Handle */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{
-          width: '12px',
-          height: '12px',
-          backgroundColor: '#3b82f6',
-          border: '2px solid #93c5fd',
-        }}
-      />
-
-      {/* Tally Bar */}
       {(tallyOnProgram || tallyOnPreview) && (
         <div style={{
           display: 'flex',
@@ -385,7 +588,6 @@ export default function ReceiverNode({ data }) {
         </div>
       )}
 
-      {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.indicator(isConnected)} />
@@ -396,73 +598,20 @@ export default function ReceiverNode({ data }) {
         </span>
       </div>
 
-      {/* Name */}
       <div style={styles.name}>
         {name}
       </div>
 
-      {/* Info Grid */}
       <div style={styles.infoGrid}>
         <div style={styles.infoRow}>
           <span style={styles.label}>Host:</span>
           <span style={styles.value}>{hostName}</span>
         </div>
 
-        {width && height && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Resolution:</span>
-            <span style={styles.value}>{width}x{height}</span>
-          </div>
-        )}
-
-        {frameRate && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Frame Rate:</span>
-            <span style={styles.value}>{frameRate.toFixed(2)} fps</span>
-          </div>
-        )}
-
-        {videoCodec && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Video Codec:</span>
-            <span style={styles.codecValue}>{videoCodec}</span>
-          </div>
-        )}
-
-        {audioCodec && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Audio:</span>
-            <span style={styles.value}>{audioCodec} {audioChannels}ch/{audioSampleRate}Hz</span>
-          </div>
-        )}
-
         {address && (
           <div style={styles.infoRow}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{address}</span>
-          </div>
-        )}
-
-        {streams && streams.length > 0 && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Streams:</span>
-            <span style={styles.value}>{streams.join(', ')}</span>
-          </div>
-        )}
-
-        {droppedFrames > 0 && (
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Dropped:</span>
-            <span style={{ ...styles.value, color: '#f87171' }}>{droppedFrames}</span>
-          </div>
-        )}
-
-        {webControlUrl && (
-          <div style={{ marginTop: '4px' }}>
-            <a href={webControlUrl} target="_blank" rel="noopener noreferrer"
-               style={{ color: '#93c5fd', fontSize: '11px', textDecoration: 'underline' }}>
-              Web Control
-            </a>
           </div>
         )}
 
@@ -478,7 +627,34 @@ export default function ReceiverNode({ data }) {
             Not connected
           </div>
         )}
+
+        <div style={styles.infoRow}>
+          <span style={styles.label}>Dropped frames:</span>
+          <span style={{
+            ...styles.value,
+            color: droppedFrames > 0 ? '#f87171' : undefined,
+          }}
+          >
+            {formatCount(droppedFrames)}
+          </span>
+        </div>
       </div>
+
+      <ReceiverStatsSections
+        channels={[statsChannel]}
+        getChannelLabel={() => name || 'Input'}
+      />
+
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{
+          width: '12px',
+          height: '12px',
+          backgroundColor: RECEIVER_HANDLE.bg,
+          border: `2px solid ${RECEIVER_HANDLE.border}`,
+        }}
+      />
     </div>
   );
 }
