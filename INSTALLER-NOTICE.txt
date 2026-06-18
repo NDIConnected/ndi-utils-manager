@@ -1,4 +1,4 @@
-NDI Manager — Installer notice
+NDI Manager - Installer notice
 
 This installer bundles the NDI SDK runtime library (Processing.NDI.Lib.x64.dll)
 alongside the application. That native library is NOT covered by the MIT license

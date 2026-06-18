@@ -227,14 +227,24 @@ Drag an existing edge endpoint to a **different** input or output. NDI Manager d
 
 On large networks, use the **Hosts** panel (left side) to group devices by **machine name** (e.g. `VECTAR-PLUS`, `HP-PRODESK`).
 
-- Click **All hosts** to show everything.
-- Click a **host name** to filter the canvas and table to that machine only.
-- Each host row shows channel counts, streaming activity, and link counts.
+| Action | Effect |
+|--------|--------|
+| **All hosts** | Show every machine (no filter) |
+| **Click** a host | Show only that machine on the canvas and in the table |
+| **Ctrl+Click** a host | Add or remove that machine from the selection (combine several hosts, e.g. HOST 01 + HOST 02) |
 
-When a host is selected:
+Each host row shows channel counts, streaming activity, and link counts. Selected hosts are highlighted in the sidebar.
+
+When **one** host is selected:
 
 - The header subtitle shows `Host: <name>`
 - **Save preset / Load preset** and **Disconnect host** become available
+
+When **several** hosts are selected:
+
+- The header shows `Hosts: <name1>, <name2>, …`
+- Canvas and table include devices from all selected machines
+- **Save preset / Load preset** and **Disconnect host** require exactly one host (select a single host for those actions)
 
 ---
 
@@ -343,7 +353,7 @@ Clears custom positions and returns nodes to the default left/right grid.
 
 Groups devices by machine into vertical columns — useful after adding many nodes or when the canvas becomes cluttered.
 
-If a **host is selected**, alignment applies to filtered devices only.
+If one or more **hosts are selected**, alignment applies to the filtered devices only.
 
 ### Host presets
 

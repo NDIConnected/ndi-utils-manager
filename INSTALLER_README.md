@@ -8,11 +8,11 @@ This document describes how to build and package the standalone desktop/tray ver
 
 ## Key Release Notes (v3.0)
 
-- Web UI v3.0: per-device compact view, drag handle, instant connection select/disconnect, layout fixes
+- Web UI v3.0: per-device compact view, drag handle, instant connection select/disconnect, layout fixes, **multi-host sidebar** (Ctrl+Click)
 - Standalone WinForms tray application (not a Windows Service)
 - **Self-contained** `.NET 9` publish for `win-x64` — **no separate .NET install** on target machines
 - Tray menu in English; disconnect balloon notifications removed
-- **Installer license aligned with NDI GPIO Panel:** MIT License + NDI SDK installer notice (see `LICENSE`, `INSTALLER-NOTICE.txt`)
+- **Installer license aligned with NDI GPIO Panel:** MIT License + NDI SDK installer notice (`LICENSE`, `INSTALLER-NOTICE.txt`); notice text uses ASCII + CRLF for correct display in the wizard
 - Installer output: `Output\NDIManager-v3.0-Setup.exe`
 - Unified icon branding with `MAN_icon.ico` for installer, application, and tray
 

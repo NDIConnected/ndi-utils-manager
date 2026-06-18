@@ -270,7 +270,7 @@ export default function NDIFlowEditor() {
   const [receiverFilter, setReceiverFilter] = useState('');
   const [mainTab, setMainTab] = useState('canvas');
   const [viewMode, setViewMode] = useState('overview');
-  const [hostFocus, setHostFocus] = useState(null);
+  const [selectedHostKeys, setSelectedHostKeys] = useState(() => new Set());
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showLegend, setShowLegend] = useState(() => localStorage.getItem('ndi-metrics-legend-seen') !== '1');
   const [compactDeviceKeys, setCompactDeviceKeys] = useState(() => {
@@ -336,6 +336,28 @@ export default function NDIFlowEditor() {
   }, []);
 
   const hostGroups = useMemo(() => buildHostGroups(snapshot), [snapshot]);
+  const singleHostKey = selectedHostKeys.size === 1 ? [...selectedHostKeys][0] : null;
+  const hostFilterLabel = useMemo(() => {
+    if (selectedHostKeys.size === 0) return null;
+    return [...selectedHostKeys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).join(', ');
+  }, [selectedHostKeys]);
+
+  const handleHostClick = useCallback((hostKey, event) => {
+    const multiSelect = event?.ctrlKey || event?.metaKey;
+    setSelectedHostKeys((prev) => {
+      if (multiSelect) {
+        const next = new Set(prev);
+        if (next.has(hostKey)) next.delete(hostKey);
+        else next.add(hostKey);
+        return next;
+      }
+      return new Set([hostKey]);
+    });
+  }, []);
+
+  const clearHostSelection = useCallback(() => {
+    setSelectedHostKeys(new Set());
+  }, []);
   const bundleLabel = useMemo(() => getBundleLabel(), []);
 
   const markPendingReceiver = useCallback((receiverUuid, ms = 4000) => {
@@ -486,36 +508,36 @@ export default function NDIFlowEditor() {
     setAutoMeasureLayout(true);
     let senders = snapshot.senders;
     let receivers = snapshot.receivers;
-    if (hostFocus) {
-      senders = filterDevicesByHost(senders, hostFocus);
-      receivers = filterDevicesByHost(receivers, hostFocus);
+    if (selectedHostKeys.size > 0) {
+      senders = filterDevicesByHost(senders, selectedHostKeys);
+      receivers = filterDevicesByHost(receivers, selectedHostKeys);
     }
     const positions = computeHostAlignedLayout(senders, receivers, expandedDeviceKeys, compactDeviceKeys);
     persistPositions(positions);
     toast('Layout aligned by host', 'success');
     setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 100);
-  }, [snapshot.senders, snapshot.receivers, hostFocus, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
+  }, [snapshot.senders, snapshot.receivers, selectedHostKeys, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
 
   const saveCurrentHostPreset = useCallback(() => {
-    if (!hostFocus) {
-      toast('Select a host from the Hosts panel', 'warning');
+    if (!singleHostKey) {
+      toast('Select exactly one host from the Hosts panel', 'warning');
       return;
     }
-    saveHostPreset(hostFocus, {
+    saveHostPreset(singleHostKey, {
       nodePositions,
       senderFilter,
       receiverFilter,
       showActiveOnly,
     });
-    toast(`Preset saved for ${hostFocus}`, 'success');
-  }, [hostFocus, nodePositions, senderFilter, receiverFilter, showActiveOnly, toast]);
+    toast(`Preset saved for ${singleHostKey}`, 'success');
+  }, [singleHostKey, nodePositions, senderFilter, receiverFilter, showActiveOnly, toast]);
 
   const loadCurrentHostPreset = useCallback(() => {
-    if (!hostFocus) {
-      toast('Select a host from the Hosts panel', 'warning');
+    if (!singleHostKey) {
+      toast('Select exactly one host from the Hosts panel', 'warning');
       return;
     }
-    const preset = loadHostPreset(hostFocus);
+    const preset = loadHostPreset(singleHostKey);
     if (!preset) {
       toast('No preset saved for this host', 'warning');
       return;
@@ -524,21 +546,21 @@ export default function NDIFlowEditor() {
     if (preset.senderFilter != null) setSenderFilter(preset.senderFilter);
     if (preset.receiverFilter != null) setReceiverFilter(preset.receiverFilter);
     if (preset.showActiveOnly != null) setShowActiveOnly(preset.showActiveOnly);
-    toast(`Preset loaded for ${hostFocus}`, 'success');
-  }, [hostFocus, persistPositions, toast]);
+    toast(`Preset loaded for ${singleHostKey}`, 'success');
+  }, [singleHostKey, persistPositions, toast]);
 
   const bulkDisconnectHost = useCallback(async () => {
-    if (!hostFocus) {
-      toast('Select a host', 'warning');
+    if (!singleHostKey) {
+      toast('Select exactly one host', 'warning');
       return;
     }
-    const receivers = filterDevicesByHost(snapshot.receivers, hostFocus);
+    const receivers = filterDevicesByHost(snapshot.receivers, singleHostKey);
     const uuids = receivers.flatMap((d) => (d.channels || []).map((c) => c.endpointUuid).filter(Boolean));
     if (uuids.length === 0) {
       toast('No receivers on this host', 'warning');
       return;
     }
-    if (!window.confirm(`Disconnect ${uuids.length} receivers on ${hostFocus}?`)) return;
+    if (!window.confirm(`Disconnect ${uuids.length} receivers on ${singleHostKey}?`)) return;
 
     blockPollingDuringMutation(5000);
     try {
@@ -550,7 +572,7 @@ export default function NDIFlowEditor() {
     } finally {
       setTimeout(() => fetchDevices(true), 800);
     }
-  }, [hostFocus, snapshot.receivers, blockPollingDuringMutation, fetchDevices, toast]);
+  }, [singleHostKey, snapshot.receivers, blockPollingDuringMutation, fetchDevices, toast]);
 
   const disconnectReceiver = useCallback(async (receiverUuid) => {
     if (!receiverUuid) return;
@@ -800,8 +822,8 @@ export default function NDIFlowEditor() {
     let filteredReceivers = snapshot.receivers.filter((device) =>
       matchesFilterQuery(buildDeviceSearchText(device), receiverFilter));
 
-    filteredSenders = filterDevicesByHost(filteredSenders, hostFocus);
-    filteredReceivers = filterDevicesByHost(filteredReceivers, hostFocus);
+    filteredSenders = filterDevicesByHost(filteredSenders, selectedHostKeys);
+    filteredReceivers = filterDevicesByHost(filteredReceivers, selectedHostKeys);
 
     if (showActiveOnly) {
       filteredSenders = filteredSenders.filter(deviceHasActivity);
@@ -1002,7 +1024,7 @@ export default function NDIFlowEditor() {
     isReceiverConnectionSuppressed,
     senderFilter,
     receiverFilter,
-    hostFocus,
+    selectedHostKeys,
     showActiveOnly,
     expandedDeviceKeys,
     toggleDeviceExpanded,
@@ -1053,7 +1075,9 @@ export default function NDIFlowEditor() {
         <div style={styles.headerLeft}>
           <h1 style={styles.title}>NDI Manager</h1>
           <p style={styles.subtitle}>
-            {hostFocus ? `Host: ${hostFocus}` : 'Multichannel — select a host from the sidebar'}
+            {hostFilterLabel
+              ? `${selectedHostKeys.size > 1 ? 'Hosts' : 'Host'}: ${hostFilterLabel}`
+              : 'Multichannel — select a host from the sidebar'}
           </p>
         </div>
         <div style={styles.headerRight}>
@@ -1088,7 +1112,7 @@ export default function NDIFlowEditor() {
             <div style={styles.toolbar}>
               <button type="button" style={styles.viewBtn(false)} onClick={resetLayout}>Reset layout</button>
               <button type="button" style={styles.viewBtn(false)} onClick={alignLayoutByHost}>Align by host</button>
-              {hostFocus ? (
+              {singleHostKey ? (
                 <>
                   <button type="button" style={styles.viewBtn(false)} onClick={saveCurrentHostPreset}>Save preset</button>
                   <button type="button" style={styles.viewBtn(false)} onClick={loadCurrentHostPreset}>Load preset</button>
@@ -1130,8 +1154,9 @@ export default function NDIFlowEditor() {
         {mainTab === 'canvas' && viewMode === 'overview' && (
           <HostOverview
             hostGroups={hostGroups}
-            selectedHostKey={hostFocus}
-            onSelectHost={setHostFocus}
+            selectedHostKeys={selectedHostKeys}
+            onHostClick={handleHostClick}
+            onClearHostSelection={clearHostSelection}
             totalSenders={snapshot.senders.length}
             totalReceivers={snapshot.receivers.length}
           />
@@ -1188,7 +1213,7 @@ export default function NDIFlowEditor() {
         {mainTab === 'table' ? (
           <NdiTableView
             snapshot={snapshot}
-            hostFocus={hostFocus}
+            selectedHostKeys={selectedHostKeys}
             onDisconnect={disconnectReceiver}
             onSelectRow={handleChannelSelect}
           />

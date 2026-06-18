@@ -10,6 +10,7 @@
 - **Connection UX** — optimistic edges on connect; click a line immediately to select and disconnect (no wait for green confirm); NDI confirm still shown as solid green when reported.
 - **Layout** — stacked auto-layout with post-render height measurement; saved positions preserved; layout version bumped to avoid stale overlaps on first load.
 - **Canvas toolbar** — single **Show hosts / Canvas only** toggle (replaces separate hosts + canvas-only controls).
+- **Multi-host selection** — **Ctrl+Click** (Cmd+Click on Mac) in the Hosts sidebar to show several machines at once (e.g. HOST 01 + HOST 02); normal click selects one host only; **All hosts** clears the filter.
 - Removed **Events** tab and NDI events panel (unused).
 - Removed global **Compact nodes** toggle (replaced by per-device control).
 
@@ -23,6 +24,7 @@
 ### Desktop / installer
 
 - Application version **3.0.0**; installer **3.0** (`NDIManager-v3.0-Setup.exe`).
+- Installer **NDI SDK notice** page: fixed text encoding and line breaks (ASCII notice file + CRLF normalization in Inno Setup script).
 
 ---
 

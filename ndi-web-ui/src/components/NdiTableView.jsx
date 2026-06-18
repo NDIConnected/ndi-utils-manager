@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { channelHealthWarning } from '../utils/channelHealth';
+import { deviceMatchesHostSelection } from '../utils/deviceGrouping';
 
 export default function NdiTableView({
   snapshot,
-  hostFocus,
+  selectedHostKeys,
   onDisconnect,
   onSelectRow,
 }) {
@@ -13,7 +14,7 @@ export default function NdiTableView({
   const rows = useMemo(() => {
     const list = [];
     snapshot.receivers.forEach((device) => {
-      if (hostFocus && device.hostName !== hostFocus && device.address !== hostFocus) return;
+      if (!deviceMatchesHostSelection(device, selectedHostKeys)) return;
       (device.channels || []).forEach((channel) => {
         list.push({
           id: channel.endpointUuid || `${device.deviceKey}-${channel.channelId}`,
@@ -44,7 +45,7 @@ export default function NdiTableView({
       return 0;
     });
     return list;
-  }, [snapshot.receivers, hostFocus, sortKey, sortDir]);
+  }, [snapshot.receivers, selectedHostKeys, sortKey, sortDir]);
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));

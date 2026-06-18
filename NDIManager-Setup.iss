@@ -71,6 +71,16 @@ var
   DisclaimerMemo: TNewMemo;
   DisclaimerAcceptCheck: TNewCheckBox;
 
+function NormalizeLineBreaks(const S: String): String;
+var
+  T: String;
+begin
+  T := S;
+  StringChangeEx(T, #13#10, #10, True);
+  StringChangeEx(T, #10, #13#10, True);
+  Result := T;
+end;
+
 function LoadDisclaimerText(): String;
 var
   Filename: String;
@@ -80,7 +90,7 @@ begin
   if not LoadStringFromFile(Filename, AnsiText) then
     Result := ''
   else
-    Result := String(AnsiText);
+    Result := NormalizeLineBreaks(String(AnsiText));
 end;
 
 procedure DisclaimerAcceptClick(Sender: TObject);

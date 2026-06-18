@@ -95,9 +95,23 @@ export function buildHostGroups(snapshot) {
   });
 }
 
-export function filterDevicesByHost(devices, hostKey) {
-  if (!hostKey) return devices;
-  return devices.filter((d) => getHostKey(d) === hostKey);
+/**
+ * @param {object[]} devices
+ * @param {null|undefined|string|string[]|Set<string>} hostKeys — empty/null = no filter
+ */
+export function filterDevicesByHost(devices, hostKeys) {
+  if (!hostKeys) return devices;
+  const list = hostKeys instanceof Set ? [...hostKeys] : Array.isArray(hostKeys) ? hostKeys : [hostKeys];
+  if (list.length === 0) return devices;
+  const allowed = new Set(list);
+  return devices.filter((d) => allowed.has(getHostKey(d)));
+}
+
+export function deviceMatchesHostSelection(device, hostKeys) {
+  if (!hostKeys || (hostKeys instanceof Set && hostKeys.size === 0)) return true;
+  const list = hostKeys instanceof Set ? [...hostKeys] : Array.isArray(hostKeys) ? hostKeys : [hostKeys];
+  if (list.length === 0) return true;
+  return list.includes(getHostKey(device));
 }
 
 export const LARGE_NETWORK_DEVICE_THRESHOLD = 10;

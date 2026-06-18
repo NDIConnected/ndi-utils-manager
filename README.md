@@ -64,6 +64,7 @@ Details: [INSTALLER_README.md](INSTALLER_README.md).
 - **Auto layout** — stacked layout with post-render height measurement (no overlapping nodes on first load).  
 - **Tray menu in English**; disconnect **balloon notifications removed**.  
 - **Self-contained publish** — fixed installer/runtime dependency issues.
+- **Multi-host filter** — Ctrl+Click hosts in the sidebar to combine machines on the canvas and in the table.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
 

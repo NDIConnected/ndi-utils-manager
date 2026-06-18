@@ -88,22 +88,25 @@ function StatChip({ label, value, color }) {
 
 export default function HostOverview({
   hostGroups,
-  selectedHostKey,
-  onSelectHost,
+  selectedHostKeys,
+  onHostClick,
+  onClearHostSelection,
   totalSenders,
   totalReceivers,
 }) {
+  const hasSelection = selectedHostKeys.size > 0;
+
   return (
     <aside style={panel.root}>
       <div style={panel.header}>Hosts</div>
       <div style={panel.hint}>
-        Group by machine/application. Select a host to work on that system only in the canvas.
+        Click a host to focus the canvas. Ctrl+Click to combine multiple hosts (e.g. HOST 01 + HOST 02).
       </div>
       <div style={panel.list}>
         <button
           type="button"
-          style={panel.allRow(!selectedHostKey)}
-          onClick={() => onSelectHost(null)}
+          style={panel.allRow(!hasSelection)}
+          onClick={onClearHostSelection}
         >
           <div style={panel.rowTitle}>All hosts</div>
           <div style={panel.stats}>
@@ -113,7 +116,7 @@ export default function HostOverview({
         </button>
 
         {hostGroups.map((host) => {
-          const selected = selectedHostKey === host.key;
+          const selected = selectedHostKeys.has(host.key);
           const active =
             host.streamingSenders + host.streamingReceivers + host.connectionCount > 0;
           return (
@@ -124,7 +127,7 @@ export default function HostOverview({
                 ...panel.row(selected),
                 opacity: active ? 1 : 0.72,
               }}
-              onClick={() => onSelectHost(host.key)}
+              onClick={(e) => onHostClick(host.key, e)}
             >
               <div style={panel.rowTitle} title={host.label}>
                 {host.label}
