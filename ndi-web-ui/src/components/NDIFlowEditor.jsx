@@ -31,6 +31,8 @@ import {
 import {
   computeDefaultLayout,
   computeHostAlignedLayout,
+  collectLayoutHostKeys,
+  enrichNodesWithDomMeasurements,
   saveHostPreset,
   loadHostPreset,
   getBundleLabel,
@@ -40,7 +42,7 @@ import {
 
 const API_BASE = '/api/ndi';
 const HIDE_INTERNAL_CONNECTIONS = false;
-const NODE_LAYOUT_VERSION = '9';
+const NODE_LAYOUT_VERSION = '11';
 
 const styles = {
   container: { width: '100vw', height: '100vh', backgroundColor: '#111827', display: 'flex', flexDirection: 'column' },
@@ -555,18 +557,103 @@ export default function NDIFlowEditor() {
 
   const alignLayoutByHost = useCallback(() => {
     userLayoutRef.current = false;
-    setAutoMeasureLayout(true);
+    setAutoMeasureLayout(false);
+
     let senders = snapshot.senders;
     let receivers = snapshot.receivers;
     if (selectedHostKeys.size > 0) {
       senders = filterDevicesByHost(senders, selectedHostKeys);
       receivers = filterDevicesByHost(receivers, selectedHostKeys);
     }
-    const positions = computeHostAlignedLayout(senders, receivers, expandedDeviceKeys, compactDeviceKeys);
-    persistPositions(positions);
-    toast('Layout aligned by host', 'success');
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 100);
-  }, [snapshot.senders, snapshot.receivers, selectedHostKeys, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
+
+    const hostKeys = collectLayoutHostKeys(senders, receivers);
+
+    const fitAlignedView = () => {
+      setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 120);
+    };
+
+    const updateAllNodeInternals = () => {
+      const inst = rfInstanceRef.current;
+      if (!inst?.updateNodeInternals) return;
+      (inst.getNodes?.() ?? []).forEach((node) => {
+        inst.updateNodeInternals(node.id);
+      });
+    };
+
+    const applyPositionsToFlow = (positions) => {
+      setNodes((prev) => {
+        if (prev.length === 0) return prev;
+        return prev.map((node) => {
+          const nextPos = positions[node.id];
+          if (!nextPos) return node;
+          return { ...node, position: { x: nextPos.x, y: nextPos.y } };
+        });
+      });
+    };
+
+    const applyHostLayout = (nodes = null) => {
+      const enrichedNodes = nodes?.length ? enrichNodesWithDomMeasurements(nodes) : null;
+      const positions = computeHostAlignedLayout(
+        senders,
+        receivers,
+        expandedDeviceKeys,
+        compactDeviceKeys,
+        enrichedNodes,
+        hostKeys,
+      );
+      persistPositions(positions);
+      applyPositionsToFlow(positions);
+      return positions;
+    };
+
+    const getFlowNodes = () => rfInstanceRef.current?.getNodes?.() ?? [];
+
+    const nodesReadyForMeasure = (nodes) =>
+      nodes.length > 0 && nodes.every((node) => (node.measured?.height ?? 0) >= 80);
+
+    applyHostLayout(null);
+    updateAllNodeInternals();
+
+    let attempts = 0;
+    let finished = false;
+    const finalize = (nodes) => {
+      if (finished) return;
+      finished = true;
+      applyHostLayout(nodes);
+      updateAllNodeInternals();
+      userLayoutRef.current = true;
+      toast('Layout aligned by host', 'success');
+      fitAlignedView();
+    };
+
+    const retryMeasure = () => {
+      if (finished) return;
+      attempts += 1;
+      updateAllNodeInternals();
+      const nodes = enrichNodesWithDomMeasurements(getFlowNodes());
+      if (nodesReadyForMeasure(nodes) || attempts >= 40) {
+        finalize(nodes);
+        return;
+      }
+      requestAnimationFrame(retryMeasure);
+    };
+
+    requestAnimationFrame(() => {
+      retryMeasure();
+      setTimeout(() => {
+        if (!finished) finalize(enrichNodesWithDomMeasurements(getFlowNodes()));
+      }, 320);
+    });
+  }, [
+    snapshot.senders,
+    snapshot.receivers,
+    selectedHostKeys,
+    expandedDeviceKeys,
+    compactDeviceKeys,
+    persistPositions,
+    setNodes,
+    toast,
+  ]);
 
   const saveCurrentHostPreset = useCallback(() => {
     if (!singleHostKey) {
@@ -944,6 +1031,13 @@ export default function NDIFlowEditor() {
       return stackedLayout[nodeId] || { x: 80, y: 120 };
     };
 
+    const resolveNodePosition = (nodeId, node) => {
+      if (draggingNodeIdsRef.current.has(nodeId) && isValidSavedPosition(node?.position)) {
+        return node.position;
+      }
+      return resolvePosition(nodeId);
+    };
+
     const buildNodeData = (device, rolePrefix) => {
       const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
       const channelCount = device.channels?.length || 0;
@@ -990,7 +1084,7 @@ export default function NDIFlowEditor() {
         id: nodeId,
         type: 'senderNode',
         dragHandle: '.node-drag-handle',
-        position: resolvePosition(nodeId),
+        position: resolveNodePosition(nodeId, undefined),
         data: buildNodeData(device, 'sender'),
       };
     });
@@ -1001,7 +1095,7 @@ export default function NDIFlowEditor() {
         id: nodeId,
         type: 'receiverNode',
         dragHandle: '.node-drag-handle',
-        position: resolvePosition(nodeId),
+        position: resolveNodePosition(nodeId, undefined),
         data: buildNodeData(device, 'receiver'),
       };
     });
@@ -1089,7 +1183,7 @@ export default function NDIFlowEditor() {
           return {
             ...node,
             data: fresh.data,
-            position: keepDragPosition ? node.position : fresh.position,
+            position: keepDragPosition ? node.position : resolvePosition(node.id),
           };
         });
       });
@@ -1323,7 +1417,7 @@ export default function NDIFlowEditor() {
 
       <div style={styles.footer}>
         <span>
-          v{systemStatus?.appVersion || '3.1.0'}
+          v{systemStatus?.appVersion || '3.2.0'}
           {systemStatus?.lastDiscoveryAt
             ? ` · updated ${new Date(systemStatus.lastDiscoveryAt).toLocaleTimeString('en-US')}`
             : ''}

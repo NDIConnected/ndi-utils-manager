@@ -2,7 +2,7 @@
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
-**Current release:** version **3.1** — self-contained installer, no separate .NET runtime required.
+**Current release:** version **3.2** — self-contained installer, no separate .NET runtime required.
 
 Repository: https://github.com/NDIConnected/ndi-utils-manager
 
@@ -16,7 +16,7 @@ The published installer bundles the .NET runtime. End users do **not** need to i
 
 ## Quick start (installed app)
 
-1. Run **`NDIManager-v3.1-Setup.exe`** from `Output\` (after building the installer) or your release package.  
+1. Run **`NDIManager-v3.2-Setup.exe`** from `Output\` (after building the installer) or your release package.  
 2. Use the **system tray** icon → **Open Web UI** (default `http://localhost:5000`).  
 3. Drag connections on the **Canvas** tab; use **Table** for a receiver list.
 
@@ -55,6 +55,13 @@ dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
 ```
 
 Details: [INSTALLER_README.md](INSTALLER_README.md).
+
+## What's new in 3.2 (summary)
+
+- **Align by host** — no more overlapping nodes on Bridge-heavy setups; devices grouped by IP with measured card heights.
+- **Tighter canvas layout** — host columns sized dynamically instead of wide fixed slots.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## What's new in 3.1 (summary)
 

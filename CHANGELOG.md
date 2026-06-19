@@ -1,5 +1,19 @@
 # NDI Manager - Changelog
 
+## [Version 3.2] - 2026-06-16
+
+### Web UI
+
+- **Align by host** — fixed overlapping nodes (Bridge hub, Studio Monitor, multi-channel senders) using DOM height measurement and IP-based host grouping.
+- **Tighter host layout** — dynamic column bands per machine instead of fixed-width slots; reduced horizontal and vertical spacing while keeping nodes separated.
+- Layout version bumped to invalidate stale saved positions after upgrade.
+
+### Desktop / installer
+
+- Application version **3.2.0**; installer **3.2** (`NDIManager-v3.2-Setup.exe`).
+
+---
+
 ## [Version 3.1] - 2026-06-16
 
 ### Web UI

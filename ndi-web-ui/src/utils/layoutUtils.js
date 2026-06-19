@@ -1,18 +1,26 @@
 import {
   COLLAPSE_CHANNELS_THRESHOLD,
   MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
+  getHostKey,
 } from './deviceGrouping';
 
 const DEFAULT_SENDER_X = 80;
-const DEFAULT_RECEIVER_X = 940;
+const DEFAULT_RECEIVER_X = 960;
 const DEFAULT_NODE_Y_START = 120;
-const HOST_COLUMN_GAP = 420;
-const NODE_VERTICAL_PADDING = 48;
+const HOST_BAND_PADDING = 56;
+const MIN_SENDER_RECEIVER_GAP = 88;
+const NODE_MIN_WIDTH = 280;
+const NODE_COMPACT_WIDTH = 280;
+const NODE_DETAIL_WIDTH = 320;
+const NODE_RECEIVER_DETAIL_WIDTH = 360;
+const NODE_VERTICAL_PADDING = 52;
 const NODE_HEADER_HEIGHT = 300;
 const CHANNEL_ROW_HEIGHT = 40;
+const BRIDGE_CHANNEL_ROW_HEIGHT = 46;
 const COLLAPSED_EXTRA_HEIGHT = 48;
 const STATS_SECTIONS_HEIGHT = 110;
 const COLLAPSE_BUTTON_HEIGHT = 40;
+const BRIDGE_HUB_EXTRA_HEIGHT = 88;
 const MEASURED_HEIGHT_FALLBACK = 420;
 
 export function estimateAggregatedNodeHeight(
@@ -37,24 +45,110 @@ export function estimateAggregatedNodeHeight(
   const visibleRows = isCollapsed
     ? Math.min(MAX_VISIBLE_HANDLES_WHEN_COLLAPSED, channelCount)
     : channelCount;
+  const rowHeight = isBridgeHub ? BRIDGE_CHANNEL_ROW_HEIGHT : CHANNEL_ROW_HEIGHT;
 
-  let height = NODE_HEADER_HEIGHT + visibleRows * CHANNEL_ROW_HEIGHT;
-  if (!isBridgeHub) height += STATS_SECTIONS_HEIGHT;
+  let height = NODE_HEADER_HEIGHT + visibleRows * rowHeight;
+  if (isBridgeHub) {
+    height += BRIDGE_HUB_EXTRA_HEIGHT;
+  } else {
+    height += STATS_SECTIONS_HEIGHT;
+  }
   if (isCollapsed && (isBridgeHub ? channelCount > 1 : channelCount > COLLAPSE_CHANNELS_THRESHOLD)) {
     height += COLLAPSED_EXTRA_HEIGHT;
   } else if (!isBridgeHub && channelCount > COLLAPSE_CHANNELS_THRESHOLD) {
     height += COLLAPSE_BUTTON_HEIGHT;
   }
 
-  return Math.max(height, MEASURED_HEIGHT_FALLBACK / 2);
+  return Math.max(height, compactView ? 120 : MEASURED_HEIGHT_FALLBACK / 2);
 }
 
-function getNodeHeight(node, device, expandedDeviceKeys, rolePrefix) {
+function getNodeHeight(node, device, expandedDeviceKeys, rolePrefix, compactDeviceKeys = new Set()) {
+  const nodeId = device?.deviceKey
+    ? `${rolePrefix}-device-${device.deviceKey}`
+    : node?.id;
+  const compactView = node?.data?.compactView === true
+    || (nodeId ? compactDeviceKeys.has(nodeId) : false);
+  const estimated = device
+    ? estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compactView)
+    : (compactView ? 140 : MEASURED_HEIGHT_FALLBACK);
+
   const measured = node?.measured?.height ?? node?.height;
-  if (Number.isFinite(measured) && measured > 0) return measured;
-  const compactView = node?.data?.compactView === true;
-  if (device) return estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compactView);
-  return compactView ? 140 : MEASURED_HEIGHT_FALLBACK;
+  if (Number.isFinite(measured) && measured > 0) {
+    return Math.max(measured, estimated);
+  }
+  return estimated;
+}
+
+export function estimateAggregatedNodeWidth(device, rolePrefix = 'sender', compactView = false) {
+  if (compactView) return NODE_COMPACT_WIDTH;
+  if (rolePrefix === 'receiver') return NODE_RECEIVER_DETAIL_WIDTH;
+  const channelCount = device?.channels?.length || 0;
+  if (device?.isBridgeHub && channelCount > 1) return 340;
+  if (channelCount > COLLAPSE_CHANNELS_THRESHOLD) return 340;
+  return NODE_DETAIL_WIDTH;
+}
+
+/** Group devices on the same machine by IP; fall back to sidebar host key. */
+export function layoutHostKey(device) {
+  const addr = (device?.address || '').trim();
+  if (addr) return addr;
+  return getHostKey(device);
+}
+
+export function collectLayoutHostKeys(senders, receivers) {
+  const keys = new Set();
+  senders.forEach((device) => keys.add(layoutHostKey(device)));
+  receivers.forEach((device) => keys.add(layoutHostKey(device)));
+  return [...keys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+/** Merge React Flow measurements with DOM bounds when available. */
+export function enrichNodesWithDomMeasurements(nodes) {
+  if (typeof document === 'undefined') return nodes;
+
+  return nodes.map((node) => {
+    const el = document.querySelector(`.react-flow__node[data-id="${node.id}"]`);
+    if (!el) return node;
+
+    const rect = el.getBoundingClientRect();
+    const width = Math.ceil(rect.width);
+    const height = Math.ceil(rect.height);
+    if (width <= 0 || height <= 0) return node;
+
+    return {
+      ...node,
+      measured: {
+        width: Math.max(node.measured?.width ?? 0, width),
+        height: Math.max(node.measured?.height ?? 0, height),
+      },
+    };
+  });
+}
+
+function getNodeWidth(node, device, rolePrefix, compactDeviceKeys = new Set()) {
+  const nodeId = device?.deviceKey
+    ? `${rolePrefix}-device-${device.deviceKey}`
+    : node?.id;
+  const compactView = node?.data?.compactView === true
+    || (nodeId ? compactDeviceKeys.has(nodeId) : false);
+  const estimated = device
+    ? estimateAggregatedNodeWidth(device, rolePrefix, compactView)
+    : NODE_MIN_WIDTH;
+
+  const measured = node?.measured?.width ?? node?.width;
+  if (Number.isFinite(measured) && measured > 0) {
+    return Math.max(measured, estimated, NODE_MIN_WIDTH);
+  }
+  return Math.max(estimated, NODE_MIN_WIDTH);
+}
+
+function maxColumnWidth(devices, rolePrefix, nodeById, compactDeviceKeys) {
+  if (!devices.length) return 0;
+  return devices.reduce((max, device) => {
+    const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
+    const node = nodeById?.get(nodeId);
+    return Math.max(max, getNodeWidth(node, device, rolePrefix, compactDeviceKeys));
+  }, NODE_MIN_WIDTH);
 }
 
 function stackDevicesWithHeights(devices, rolePrefix, x, getHeight) {
@@ -84,11 +178,50 @@ function stackDevices(devices, rolePrefix, x, expandedDeviceKeys, compactDeviceK
   );
 }
 
+function resolveHostKey(device) {
+  return layoutHostKey(device);
+}
+
+function sortHostDevices(devices) {
+  return [...devices].sort((a, b) => {
+    const bridgeDelta = Number(a?.isBridgeHub === true) - Number(b?.isBridgeHub === true);
+    if (bridgeDelta !== 0) return bridgeDelta;
+    const legacyDelta = Number(a?.isLegacyDiscovery === true) - Number(b?.isLegacyDiscovery === true);
+    if (legacyDelta !== 0) return legacyDelta;
+    return (a?.displayName || a?.deviceKey || '').localeCompare(
+      b?.displayName || b?.deviceKey || '',
+      undefined,
+      { sensitivity: 'base' },
+    );
+  });
+}
+
+function buildHeightResolver(
+  nodeById,
+  expandedDeviceKeys,
+  compactDeviceKeys,
+  rolePrefix,
+) {
+  return (nodeId, device) => {
+    if (nodeById) {
+      const node = nodeById.get(nodeId);
+      return getNodeHeight(node, device, expandedDeviceKeys, rolePrefix, compactDeviceKeys);
+    }
+    return estimateAggregatedNodeHeight(
+      device,
+      expandedDeviceKeys,
+      rolePrefix,
+      compactDeviceKeys.has(nodeId),
+    );
+  };
+}
+
 export function computeLayoutFromMeasuredNodes(
   nodes,
   senders,
   receivers,
   expandedDeviceKeys = new Set(),
+  compactDeviceKeys = new Set(),
 ) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const positions = {};
@@ -97,7 +230,7 @@ export function computeLayoutFromMeasuredNodes(
   senders.forEach((device) => {
     const nodeId = `sender-device-${device.deviceKey}`;
     const node = nodeById.get(nodeId);
-    const height = getNodeHeight(node, device, expandedDeviceKeys, 'sender');
+    const height = getNodeHeight(node, device, expandedDeviceKeys, 'sender', compactDeviceKeys);
     positions[nodeId] = { x: DEFAULT_SENDER_X, y: senderY };
     senderY += height + NODE_VERTICAL_PADDING;
   });
@@ -106,7 +239,7 @@ export function computeLayoutFromMeasuredNodes(
   receivers.forEach((device) => {
     const nodeId = `receiver-device-${device.deviceKey}`;
     const node = nodeById.get(nodeId);
-    const height = getNodeHeight(node, device, expandedDeviceKeys, 'receiver');
+    const height = getNodeHeight(node, device, expandedDeviceKeys, 'receiver', compactDeviceKeys);
     positions[nodeId] = { x: DEFAULT_RECEIVER_X, y: receiverY };
     receiverY += height + NODE_VERTICAL_PADDING;
   });
@@ -131,21 +264,52 @@ export function computeHostAlignedLayout(
   receivers,
   expandedDeviceKeys = new Set(),
   compactDeviceKeys = new Set(),
+  nodes = null,
+  hostKeys = null,
 ) {
   const positions = {};
-  const hosts = new Set();
-  senders.forEach((d) => hosts.add(d.hostName || d.address || 'unknown'));
-  receivers.forEach((d) => hosts.add(d.hostName || d.address || 'unknown'));
-  const hostList = [...hosts].sort((a, b) => a.localeCompare(b));
+  const hostList = Array.isArray(hostKeys) && hostKeys.length > 0
+    ? hostKeys
+    : collectLayoutHostKeys(senders, receivers);
+  const nodeById = Array.isArray(nodes) && nodes.length > 0
+    ? new Map(nodes.map((node) => [node.id, node]))
+    : null;
 
-  hostList.forEach((host, hostIndex) => {
-    const hostSenders = senders.filter((d) => (d.hostName || d.address || 'unknown') === host);
-    const hostReceivers = receivers.filter((d) => (d.hostName || d.address || 'unknown') === host);
-    const senderX = DEFAULT_SENDER_X + hostIndex * HOST_COLUMN_GAP;
-    const receiverX = DEFAULT_RECEIVER_X + hostIndex * HOST_COLUMN_GAP;
+  let bandX = DEFAULT_SENDER_X;
 
-    Object.assign(positions, stackDevices(hostSenders, 'sender', senderX, expandedDeviceKeys, compactDeviceKeys));
-    Object.assign(positions, stackDevices(hostReceivers, 'receiver', receiverX, expandedDeviceKeys, compactDeviceKeys));
+  hostList.forEach((host) => {
+    const hostSenders = sortHostDevices(senders.filter((d) => layoutHostKey(d) === host));
+    const hostReceivers = sortHostDevices(receivers.filter((d) => layoutHostKey(d) === host));
+    const senderColumnWidth = maxColumnWidth(hostSenders, 'sender', nodeById, compactDeviceKeys);
+    const receiverColumnWidth = maxColumnWidth(hostReceivers, 'receiver', nodeById, compactDeviceKeys);
+    const senderHeight = buildHeightResolver(nodeById, expandedDeviceKeys, compactDeviceKeys, 'sender');
+    const receiverHeight = buildHeightResolver(nodeById, expandedDeviceKeys, compactDeviceKeys, 'receiver');
+
+    const hasSenders = hostSenders.length > 0;
+    const hasReceivers = hostReceivers.length > 0;
+    const senderX = bandX;
+    const receiverX = hasSenders && hasReceivers
+      ? bandX + senderColumnWidth + MIN_SENDER_RECEIVER_GAP
+      : bandX;
+
+    if (hasSenders) {
+      Object.assign(
+        positions,
+        stackDevicesWithHeights(hostSenders, 'sender', senderX, senderHeight),
+      );
+    }
+    if (hasReceivers) {
+      Object.assign(
+        positions,
+        stackDevicesWithHeights(hostReceivers, 'receiver', receiverX, receiverHeight),
+      );
+    }
+
+    const bandWidth = hasSenders && hasReceivers
+      ? senderColumnWidth + MIN_SENDER_RECEIVER_GAP + receiverColumnWidth
+      : Math.max(hasSenders ? senderColumnWidth : 0, hasReceivers ? receiverColumnWidth : 0);
+
+    bandX += bandWidth + HOST_BAND_PADDING;
   });
 
   return positions;

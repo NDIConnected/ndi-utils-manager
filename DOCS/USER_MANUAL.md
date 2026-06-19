@@ -1,6 +1,6 @@
 # NDI Manager — User Manual
 
-**Version 3.1** · June 2026
+**Version 3.2** · June 2026
 
 NDI Manager is a Windows desktop application that discovers NDI senders and receivers on your network, shows them on a visual canvas, and lets you connect receiver inputs to sender outputs through the NDI Discovery Server.
 
@@ -417,9 +417,9 @@ Clears custom positions and returns nodes to the default left/right grid.
 
 ### Align by host
 
-Groups devices by machine into vertical columns — useful after adding many nodes or when the canvas becomes cluttered.
+Groups devices by machine into vertical columns — useful after adding many nodes or when the canvas becomes cluttered. Devices on the same IP address stay in one column (e.g. Bridge hub and Studio Monitor on the same host). Card heights are measured after render so expanded Bridge hubs and multi-channel senders do not overlap.
 
-If one or more **hosts are selected**, alignment applies to the filtered devices only.
+If one or more **hosts are selected**, alignment applies to the filtered devices only. After upgrading, use **Reset layout** then **Align by host** once if nodes appear misaligned.
 
 ### Host presets
 

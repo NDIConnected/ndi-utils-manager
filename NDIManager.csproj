@@ -11,9 +11,9 @@
     <ApplicationIcon>MAN_icon.ico</ApplicationIcon>
 
     <!-- Version Information -->
-    <Version>3.1.0</Version>
-    <AssemblyVersion>3.1.0.0</AssemblyVersion>
-    <FileVersion>3.1.0.0</FileVersion>
+    <Version>3.2.0</Version>
+    <AssemblyVersion>3.2.0.0</AssemblyVersion>
+    <FileVersion>3.2.0.0</FileVersion>
     <Company>NDI Manager</Company>
     <Product>NDI Manager</Product>
     <Description>NDI Discovery and Control Manager with Web UI</Description>
