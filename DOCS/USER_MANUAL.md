@@ -16,6 +16,8 @@ This manual describes day-to-day use of the installed application and Web UI. Fo
 4. [System tray application](#4-system-tray-application)
 5. [Web UI — getting started](#5-web-ui--getting-started)
 6. [Canvas view](#6-canvas-view)
+   - [NDI Bridge hub](#ndi-bridge-hub)
+   - [Legacy senders](#legacy-senders)
 7. [Managing connections](#7-managing-connections)
 8. [Hosts sidebar](#8-hosts-sidebar)
 9. [Filters and search](#9-filters-and-search)
@@ -23,6 +25,7 @@ This manual describes day-to-day use of the installed application and Web UI. Fo
 11. [Node details and statistics](#11-node-details-and-statistics)
 12. [Layout tools](#12-layout-tools)
 13. [Configuration](#13-configuration)
+    - [NDI Bridge hosts](#ndi-bridge-hosts)
 14. [Troubleshooting](#14-troubleshooting)
 15. [Glossary](#15-glossary)
 
@@ -34,7 +37,9 @@ NDI Manager runs in the **Windows system tray**. It hosts a local web server and
 
 - See **sender** devices (outputs) on the left and **receiver** devices (inputs) on the right
 - **Drag connections** from a sender output to a receiver input
-- Monitor **video/audio statistics**, **tally**, and **dropped frames**
+- Monitor **video/audio statistics**, **tally**, and **dropped frames** (on NDI 6 Discovery Server sources)
+- Route to **legacy** (pre-NDI 6) senders discovered via NDI Finder — connect-only, no live metrics
+- Work with **NDI Bridge** republished outputs grouped in a single hub node per bridge machine
 - Work on large installations using **host grouping**, **filters**, and a **table view**
 
 Connections are sent as NDI Discovery Server commands (`CONNECT` / `DISCONNECT`). The canvas reflects the real network state reported by NDI, not just local UI state.
@@ -142,7 +147,9 @@ Connect, disconnect, and layout actions show short **toast notifications** at th
 
 The **Canvas** tab shows an interactive diagram:
 
-- **Sender nodes** (green) on the left — NDI outputs
+- **Sender nodes** (green) on the left — NDI outputs monitored via the Discovery Server
+- **Bridge hub nodes** (orange) on the left — NDI Bridge republished outputs, grouped per bridge machine
+- **Legacy sender nodes** (gray) on the left — pre-NDI 6 / Finder-only sources (connect-only)
 - **Receiver nodes** (blue) on the right — NDI inputs
 - **Edges** (lines) — active or pending connections between channels
 
@@ -186,6 +193,56 @@ Use the built-in React Flow controls (bottom-left):
 | **Align by host** | Arrange senders/receivers in columns per machine |
 | **Save preset / Load preset** | Save or restore layout and filters for the selected host (see [Layout tools](#13-layout-tools)) |
 | **Disconnect host** | Disconnect all receivers on the focused host |
+
+### NDI Bridge hub
+
+When a machine runs **NDI Bridge** (Local Mode or similar) and republishes many transcoded outputs (e.g. H.264/H.265), NDI Manager **collapses** those outputs into **one orange hub node** per bridge host instead of dozens of separate sender cards.
+
+| Visual cue | Meaning |
+|------------|---------|
+| **Orange** border and gradient | NDI Bridge hub device |
+| **BRIDGE** badge in the header | Hub node (not a normal green sender) |
+| **Upstream label** on each output row | Original source name before transcoding (e.g. the SpeeHQ path name) |
+| **Codec badge** (e.g. H264, H265) | Transcoded format on that bridge output |
+| Banner *Transcoded outputs — drag to connect H.264/H.265 paths* | Use these connectors for bandwidth-friendly paths |
+
+**Collapsed by default:** if the hub has more than one output, it starts **collapsed** (like large multichannel devices). Click **expand** on the node to show all bridge outputs. Compact view still works via the device name toggle.
+
+**Upstream pairing:** when the same logical source exists both as a **direct SHQ** sender (green) and as a **bridge republish** (orange hub), the direct sender shows:
+
+- A blue **→ Bridge** badge on the matching output row
+- An info banner: *Bridge transcoded mirror available (connect via NDI Bridge hub)*
+
+This helps you choose **direct high-quality** vs **transcoded bridge** paths without hunting through duplicate names.
+
+**Typical workflow (mix):** receivers on the same machine may connect to **both** the direct SHQ sender and the matching bridge output — NDI Manager shows both connections. Use the bridge hub when you need H.264/H.265; use the direct sender for full-quality SHQ.
+
+**Auto-detection:** hosts whose name contains `bridge` (case-insensitive), e.g. `7010-01-BRIDGE`, are treated as bridge machines automatically. You can also list bridge hosts explicitly in configuration (see [NDI Bridge hosts](#ndi-bridge-hosts)).
+
+### Legacy senders
+
+Some senders are not registered on the NDI Discovery Server (common with **pre-NDI 6** applications or sources that only appear on the network via **NDI Finder**). NDI Manager merges these into the canvas for **routing only**.
+
+| Visual cue | Meaning |
+|------------|---------|
+| **Gray** border | Legacy / Finder-only source |
+| **LEGACY** badge in the header | Not monitored via Discovery Server Send Listener |
+| Banner *Legacy source — connect only (no SDK monitoring)* | Connect and disconnect work; live stats do not |
+
+**What works on legacy senders:**
+
+- Appear on the canvas and in filters (by name, address, stream label)
+- **Drag to connect** receivers to the legacy output — same as normal senders
+- **Disconnect** via edge select/delete
+
+**What does not work on legacy senders:**
+
+- Connected RX, Active ch, dropped frames, codec/resolution summaries
+- Video / Audio / Metadata expandable statistics
+- Tally PGM / PVW
+- Channel detail drawer shows limited fields (no live monitoring events)
+
+Legacy sources are **deduplicated by NDI name**: if the same source later appears on the Discovery Server, the monitored (green) entry takes precedence and legacy duplicate is not shown separately.
 
 ---
 
@@ -296,12 +353,15 @@ Click a column header to sort. Click a row to open the **channel detail drawer**
 
 ### Sender node summary
 
+Normal (green) senders show full monitoring. **Bridge hub** (orange) and **legacy** (gray) senders follow the rules in [NDI Bridge hub](#ndi-bridge-hub) and [Legacy senders](#legacy-senders).
+
 | Field | Description |
 |-------|-------------|
-| **Connected RX** | Number of NDI receivers listening to this sender (click to focus connections) |
-| **Active ch** | Channels currently streaming |
-| **Dropped frames** | Cumulative dropped frames (red if &gt; 0) |
-| **Video / Audio / Res/FPS / Ports** | Aggregated technical summaries |
+| **Connected RX** | Number of NDI receivers listening to this sender (click to focus connections) — *not shown on legacy senders* |
+| **Active ch** | Channels currently streaming — *not shown on legacy senders* |
+| **Dropped frames** | Cumulative dropped frames (red if &gt; 0) — *not shown on legacy senders* |
+| **Video / Audio / Res/FPS / Ports** | Aggregated technical summaries — *bridge hub: per-output when expanded; legacy: unavailable* |
+| **Monitoring** | *Legacy:* “Unavailable (pre-NDI 6 sender)” · *Bridge hub:* “Per-output (transcoded)” |
 
 Sender **colour** on outputs may indicate connection type:
 
@@ -312,7 +372,11 @@ Sender **colour** on outputs may indicate connection type:
 | Purple | Mixed full and audio-only receivers |
 | Gray | No active connections |
 
-**PGM / PVW** badges show NDI tally state.
+**Bridge hub** outputs use **upstream labels** (original source name) instead of generic `Output 01` numbering when available.
+
+**→ Bridge** on a direct sender output indicates a matching transcoded path on the bridge hub for the same upstream source.
+
+**PGM / PVW** badges show NDI tally state (not available on legacy senders).
 
 ### Receiver node summary
 
@@ -336,6 +400,8 @@ Click **Video**, **Audio**, or **Metadata** sections on a node to expand per-cha
 ### Channel detail drawer
 
 Click any **input** or **output** row (or a table row) to open the drawer on the right with full channel properties: UUID, source, codecs, streaming state, dropped frames, address, etc.
+
+For **bridge** outputs, the drawer may show upstream label and bridge mirror hints. For **legacy** senders, monitoring fields are empty or marked unavailable.
 
 ### Metrics legend
 
@@ -394,6 +460,23 @@ Restart the application after changing the Discovery Server URL.
 
 The tray menu **Discovery Server** line and the Web UI discovery pill tooltip show the active URL.
 
+### NDI Bridge hosts
+
+Bridge hub grouping applies to senders on machines identified as **NDI Bridge** hosts. By default, any hostname containing `bridge` (case-insensitive) is detected automatically — e.g. `7010-01-BRIDGE`.
+
+To force or extend the list (e.g. bridge machine without “bridge” in its hostname), set **one** of:
+
+| Method | Example |
+|--------|---------|
+| Environment variable | `NDI_BRIDGE_HOSTS=7010-01-BRIDGE,192.168.1.50` |
+| `appsettings.json` (next to exe) | `"Ndi": { "BridgeHosts": [ "7010-01-BRIDGE" ] }` |
+
+Multiple hosts are comma-separated in the environment variable, or a JSON array in config.
+
+Restart the application after changing bridge host settings.
+
+**Note:** bridge configuration affects **canvas grouping and upstream pairing only**. Connect/disconnect still uses normal NDI source names — receivers on your network connect to the bridge outputs or direct SHQ sources independently of how NDI Manager displays them.
+
 ---
 
 ## 14. Troubleshooting
@@ -431,12 +514,26 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 
 - Many sender statistics update only when **receivers are connected** and media is flowing (NDI SDK behaviour).
 - Expand the **Video** stats section after connections are active.
+- **Legacy senders** never show live statistics — this is expected (see [Legacy senders](#legacy-senders)).
 
 ### Connect/disconnect does not work
 
 - Requires a working **Recv Listener** connection to the Discovery Server.
 - The receiver must be registered on the Discovery Server (typical for managed NDI installations).
+- For **legacy** senders, connect is still sent via Discovery Server — the receiver must be able to resolve the NDI source name on the network even though NDI Manager discovered the sender via Finder only.
 - Check the **Table** view for warning icons and connection state on the affected channel.
+
+### Bridge hub shows wrong outputs or too many separate senders
+
+1. Confirm the bridge machine hostname contains `bridge` or add it to `NDI_BRIDGE_HOSTS` / `Ndi:BridgeHosts` (see [NDI Bridge hosts](#ndi-bridge-hosts)).
+2. Click **Refresh** in the Web UI header — bridge grouping is applied when the snapshot is built.
+3. If outputs appear as gray **LEGACY** nodes instead of an orange hub, the Discovery Server may not be listing them yet. Finder-only paths still work for connect; add the bridge host explicitly in config to improve grouping.
+
+### Legacy sender missing from canvas
+
+1. The source must be visible to **NDI Finder** on this PC (same subnet / mDNS).
+2. If the same NDI name is already on the Discovery Server, only the **monitored** (green) entry is shown — not a separate legacy node.
+3. Wait a few seconds after the source starts — Finder merge runs on each discovery cycle.
 
 ### Port already in use
 
@@ -465,6 +562,10 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 | **Tally PGM / PVW** | Program / Preview tally flags from compatible devices |
 | **Dropped frames** | Cumulative count reported by NDI monitoring (`video-frames-dropped`) |
 | **Host** | Machine name prefix from NDI stream naming (e.g. `VECTAR-PLUS`) |
+| **Bridge hub** | Single canvas node grouping all republished outputs from one NDI Bridge machine |
+| **Upstream label** | Original source name associated with a bridge transcoded output |
+| **Legacy sender** | NDI source found via Finder but not monitored on Discovery Server Send Listener — connect-only |
+| **NDI Finder** | SDK mechanism that enumerates NDI sources on the LAN (used to supplement legacy discovery) |
 
 ---
 

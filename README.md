@@ -76,7 +76,7 @@ The bundled `Processing.NDI.Lib.x64.dll` is **not** covered by MIT; it is subjec
 
 ## Further documentation
 
-- [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) — **User manual** (installation, Web UI, connections, troubleshooting)
+- [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) — **User manual** (installation, Web UI, NDI Bridge hub, legacy senders, connections, troubleshooting)
 - [DOCS/](DOCS/) — implementation notes and guides  
 - [CHANGELOG.md](CHANGELOG.md)
 
