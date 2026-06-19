@@ -1,4 +1,4 @@
-# NDI Manager 6.3 - Installer Build Instructions
+# NDI Manager - Installer Build Instructions
 
 ## Version 3.1
 

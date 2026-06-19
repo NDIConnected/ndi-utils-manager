@@ -1,4 +1,4 @@
-# NDI Manager 6.3
+# NDI Manager
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 

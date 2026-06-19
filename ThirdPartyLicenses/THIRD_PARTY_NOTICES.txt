@@ -1,4 +1,4 @@
-NDI Manager 6.3 - Third Party Software Notices
+NDI Manager - Third Party Software Notices
 ==============================================
 
 This software includes components from the following third-party projects:

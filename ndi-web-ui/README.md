@@ -1,6 +1,6 @@
 # NDI Manager Web UI
 
-Frontend for NDI Manager 6.3 (v2.6), built with React + Vite and rendered through React Flow.
+Frontend for **NDI Manager**, built with React + Vite and rendered through React Flow.
 
 ## Main Features
 

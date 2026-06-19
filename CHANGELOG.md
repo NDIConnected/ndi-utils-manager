@@ -1,4 +1,4 @@
-# NDI Manager 6.3 - Changelog
+# NDI Manager - Changelog
 
 ## [Version 3.1] - 2026-06-16
 

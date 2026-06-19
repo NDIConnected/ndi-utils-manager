@@ -573,7 +573,7 @@ Restart the application after changing bridge host settings.
 
 | | |
 |---|---|
-| **Product** | NDI Manager 6.3 |
+| **Product** | NDI Manager |
 | **Manual version** | 3.1 |
 | **Audience** | Operators and technical users |
 | **Related docs** | [CHANGELOG.md](../CHANGELOG.md), [INSTALLER_README.md](../INSTALLER_README.md) |
