@@ -9,6 +9,9 @@ public class NDISenderInfo
     public int Port { get; set; }
     public string SourceMetadata { get; set; } = string.Empty;
 
+    /// <summary>Discovered via NDI Finder only (pre-NDI 6 / no Send Listener registration).</summary>
+    public bool IsLegacyDiscovery { get; set; }
+
     // Tally
     public bool TallyOnProgram { get; set; }
     public bool TallyOnPreview { get; set; }
@@ -51,5 +54,7 @@ public class NDISenderInfo
     public string SdkVersion { get; set; } = string.Empty;
     public string WebControlUrl { get; set; } = string.Empty;
     public DateTime LastSeen { get; set; } = DateTime.Now;
-    public string Status => ConnectionCount > 0 ? "Active" : "Idle";
+    public string Status => IsLegacyDiscovery
+        ? "Legacy"
+        : ConnectionCount > 0 ? "Active" : "Idle";
 }

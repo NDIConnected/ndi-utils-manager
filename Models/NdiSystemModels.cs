@@ -11,6 +11,7 @@ public class NdiSystemStatus
     public string? RecvListenerServerUrl { get; set; }
     public bool FinderAvailable { get; set; }
     public int SenderCount { get; set; }
+    public int LegacySenderCount { get; set; }
     public int ReceiverCount { get; set; }
     public int ConnectionCount { get; set; }
     public DateTime LastDiscoveryAt { get; set; }

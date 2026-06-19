@@ -30,15 +30,19 @@ export function estimateAggregatedNodeHeight(
     return Math.max(cardBody, 120);
   }
 
-  const isCollapsed = channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
+  const isBridgeHub = device?.isBridgeHub === true;
+  const isCollapsed = isBridgeHub
+    ? (channelCount > 1 && !expandedDeviceKeys.has(nodeId))
+    : channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
   const visibleRows = isCollapsed
     ? Math.min(MAX_VISIBLE_HANDLES_WHEN_COLLAPSED, channelCount)
     : channelCount;
 
-  let height = NODE_HEADER_HEIGHT + visibleRows * CHANNEL_ROW_HEIGHT + STATS_SECTIONS_HEIGHT;
-  if (isCollapsed && channelCount > COLLAPSE_CHANNELS_THRESHOLD) {
+  let height = NODE_HEADER_HEIGHT + visibleRows * CHANNEL_ROW_HEIGHT;
+  if (!isBridgeHub) height += STATS_SECTIONS_HEIGHT;
+  if (isCollapsed && (isBridgeHub ? channelCount > 1 : channelCount > COLLAPSE_CHANNELS_THRESHOLD)) {
     height += COLLAPSED_EXTRA_HEIGHT;
-  } else if (channelCount > COLLAPSE_CHANNELS_THRESHOLD) {
+  } else if (!isBridgeHub && channelCount > COLLAPSE_CHANNELS_THRESHOLD) {
     height += COLLAPSE_BUTTON_HEIGHT;
   }
 

@@ -1,6 +1,6 @@
 # NDI Manager — User Manual
 
-**Version 3.0** · June 2026
+**Version 3.1** · June 2026
 
 NDI Manager is a Windows desktop application that discovers NDI senders and receivers on your network, shows them on a visual canvas, and lets you connect receiver inputs to sender outputs through the NDI Discovery Server.
 
@@ -58,7 +58,7 @@ The application listens on **localhost** by default (port **5000**). Other machi
 
 ## 3. Installation
 
-1. Run **`NDIManager-v3.0-Setup.exe`** (or the current installer from your release package).
+1. Run **`NDIManager-v3.1-Setup.exe`** (or the current installer from your release package).
 2. Follow the wizard. Optional steps:
    - Create a **desktop shortcut**
    - **Start with Windows** (auto-launch at login)
@@ -126,7 +126,7 @@ http://localhost:5000
 
 ### Footer
 
-- **Version** — e.g. `v3.0.0`
+- **Version** — e.g. `v3.1.0`
 - **Last update time** — when discovery last ran
 - **Bundle hash** — identifies the built Web UI file (useful to confirm the browser is not showing a cached old version)
 
@@ -425,7 +425,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 ### “You must install or update .NET” when launching the exe
 
 - You are running a **framework-dependent** build (e.g. from `bin\Debug`) instead of the **self-contained** installer or `publish\` output.
-- Reinstall from **`NDIManager-v3.0-Setup.exe`** or run from a self-contained `publish\` folder.
+- Reinstall from **`NDIManager-v3.1-Setup.exe`** or run from a self-contained `publish\` folder.
 
 ### Stats (frames sent, dropped frames) are zero
 
@@ -473,7 +473,7 @@ The tray menu **Discovery Server** line and the Web UI discovery pill tooltip sh
 | | |
 |---|---|
 | **Product** | NDI Manager 6.3 |
-| **Manual version** | 3.0 |
+| **Manual version** | 3.1 |
 | **Audience** | Operators and technical users |
 | **Related docs** | [CHANGELOG.md](../CHANGELOG.md), [INSTALLER_README.md](../INSTALLER_README.md) |
 

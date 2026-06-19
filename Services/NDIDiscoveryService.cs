@@ -25,7 +25,10 @@ public class NDIDiscoveryService : BackgroundService
     private readonly System.Threading.Timer _discoveryTimer;
     private IntPtr _finderInstance = IntPtr.Zero;
     private readonly string? _discoveryServerUrl;
+    private readonly HashSet<string> _bridgeHosts;
     private DateTime _lastDiscoveryAt = DateTime.UtcNow;
+    private static readonly TimeSpan SenderStaleGrace = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReceiverStaleGrace = TimeSpan.FromSeconds(3);
 
     public event Action? SnapshotUpdated;
 
@@ -57,10 +60,16 @@ public class NDIDiscoveryService : BackgroundService
         _recvListener = new NDIRecvListener(recvLogger);
 
         _discoveryServerUrl = ResolveDiscoveryServerUrl(configuration);
+        _bridgeHosts = BridgeRouting.ResolveBridgeHosts(configuration);
         var discoveryUrl = _discoveryServerUrl;
         _logger.LogInformation(
             "NDI Discovery Server URL: {Url}",
             string.IsNullOrEmpty(discoveryUrl) ? "(SDK default — null p_url_address)" : discoveryUrl);
+
+        if (_bridgeHosts.Count > 0)
+        {
+            _logger.LogInformation("NDI Bridge hosts configured: {Hosts}", string.Join(", ", _bridgeHosts));
+        }
 
         if (!_sendListener.Initialize(discoveryUrl))
         {
@@ -121,47 +130,11 @@ public class NDIDiscoveryService : BackgroundService
             CacheSenderEvents(_sendListener.GetEvents(0));
             CacheSenderEvents(_sendListener.GetEvents(50));
 
-            _senders.Clear();
-            foreach (var sender in senders)
-            {
-                if (!string.IsNullOrEmpty(sender.Id) && _senderEventCache.TryGetValue(sender.Id, out var eventData))
-                {
-                    lock (eventData)
-                    {
-                        ApplySenderMonitoringEvents(sender, eventData);
-                    }
-                }
-
-                _senders[sender.Name] = sender;
-            }
+            MergeDiscoveredSenders(senders);
 
             _logger.LogDebug("Discovered {Count} NDI senders from Discovery Server", senders.Count);
 
-            // Discover actual NDI sources using NDI Finder (standard API)
-            var sourcesByName = new Dictionary<string, string>();
-            if (_finderInstance != IntPtr.Zero)
-            {
-                uint numSources = 0;
-                IntPtr sourcesPtr = NDI.NDIlib_find_get_current_sources(_finderInstance, ref numSources);
-
-                if (sourcesPtr != IntPtr.Zero && numSources > 0)
-                {
-                    int structSize = Marshal.SizeOf<NDI.source_t>();
-
-                    for (int i = 0; i < numSources; i++)
-                    {
-                        IntPtr currentPtr = IntPtr.Add(sourcesPtr, i * structSize);
-                        var source = Marshal.PtrToStructure<NDI.source_t>(currentPtr);
-
-                        string sourceName = source.p_ndi_name != IntPtr.Zero ? Marshal.PtrToStringAnsi(source.p_ndi_name) ?? "" : "";
-
-                        if (!string.IsNullOrEmpty(sourceName))
-                            sourcesByName[sourceName] = sourceName;
-                    }
-
-                    _logger.LogDebug("Discovered {Count} NDI sources using Finder", numSources);
-                }
-            }
+            var legacyAdded = MergeFinderLegacySenders();
 
             _recvListener.WaitForReceivers(0);
             var receivers = _recvListener.GetReceivers();
@@ -173,24 +146,19 @@ public class NDIDiscoveryService : BackgroundService
 
             SyncReceiverSourceNamesFromEventCache();
 
-            // Update receivers dictionary and correlate with sources
-            _receivers.Clear();
-            foreach (var receiver in receivers)
-            {
-                ApplyReceiverConnectionFromEvents(receiver);
-
-                if (!string.IsNullOrEmpty(receiver.Id) && _receiverEventCache.TryGetValue(receiver.Id, out var eventData))
-                {
-                    lock (eventData)
-                    {
-                        ApplyReceiverMonitoringEvents(receiver, eventData);
-                    }
-                }
-
-                _receivers[receiver.Id] = receiver;
-            }
+            MergeDiscoveredReceivers(receivers);
 
             _logger.LogDebug($"Discovered {receivers.Count} NDI receivers");
+
+            if (legacyAdded > 0)
+            {
+                _logger.LogDebug(
+                    "Merged {LegacyAdded} legacy finder source(s); total senders={Total} ({Legacy} legacy, {Monitored} monitored)",
+                    legacyAdded,
+                    _senders.Count,
+                    _senders.Values.Count(s => s.IsLegacyDiscovery),
+                    _senders.Values.Count(s => !s.IsLegacyDiscovery));
+            }
 
             PublishSnapshotUpdate();
         }
@@ -222,7 +190,7 @@ public class NDIDiscoveryService : BackgroundService
 
     private NdiSystemStatus BuildSystemStatus(NDIAggregatedSnapshot snapshot)
     {
-        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.0.0";
+        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.1.0";
         var health = "ok";
         if (!_sendListener.IsConnected && !_recvListener.IsConnected)
             health = "error";
@@ -242,6 +210,7 @@ public class NDIDiscoveryService : BackgroundService
             RecvListenerServerUrl = _recvListener.ServerUrl,
             FinderAvailable = _finderInstance != IntPtr.Zero,
             SenderCount = snapshot.Senders.Count,
+            LegacySenderCount = snapshot.Senders.Count(d => d.IsLegacyDiscovery),
             ReceiverCount = snapshot.Receivers.Count,
             ConnectionCount = snapshot.Connections.Count,
             LastDiscoveryAt = _lastDiscoveryAt,
@@ -294,6 +263,8 @@ public class NDIDiscoveryService : BackgroundService
         var senders = GetSenders();
         var receivers = GetReceivers();
 
+        BridgeRouting.NormalizeBridgeSenderHosts(senders, _bridgeHosts);
+
         var senderByName = senders
             .Where(s => !string.IsNullOrWhiteSpace(s.Name))
             .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
@@ -343,6 +314,7 @@ public class NDIDiscoveryService : BackgroundService
                 EndpointUuid = sender.Id,
                 EndpointName = sender.Name,
                 Role = role,
+                IsLegacyDiscovery = sender.IsLegacyDiscovery,
                 IsConnected = sender.ConnectionCount > 0,
                 ConnectionCount = sender.ConnectionCount,
                 IsStreaming = IsChannelStreaming(
@@ -391,6 +363,10 @@ public class NDIDiscoveryService : BackgroundService
             if (parsed.ApplicationId != "unknown" && !string.IsNullOrWhiteSpace(parsed.DeviceId))
                 senderAppByDeviceId[parsed.DeviceId] = parsed.ApplicationId;
         }
+
+        BridgeRouting.ConsolidateBridgeHubs(senderDevices, _bridgeHosts);
+        BridgeRouting.RebuildSenderChannelMaps(senderDevices.Values, senderChannelsByName, senderChannelsByAppChannel);
+        BridgeRouting.ApplyUpstreamPairing(senderDevices.Values);
 
         foreach (var receiver in receivers)
         {
@@ -497,6 +473,9 @@ public class NDIDiscoveryService : BackgroundService
 
         foreach (var device in senderDevices.Values)
             UpdateDeviceTechnicalSummaries(device);
+
+        foreach (var device in senderDevices.Values)
+            device.IsLegacyDiscovery = device.Channels.Count > 0 && device.Channels.All(c => c.IsLegacyDiscovery);
 
         foreach (var device in receiverDevices.Values)
             UpdateDeviceTechnicalSummaries(device);
@@ -1344,6 +1323,197 @@ public class NDIDiscoveryService : BackgroundService
             _logger.LogError(ex, $"Error sending DISCONNECT command to receiver {receiverUuid}");
             return false;
         }
+    }
+
+    private void MergeDiscoveredSenders(IReadOnlyList<NDISenderInfo> discovered)
+    {
+        var now = DateTime.UtcNow;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sender in discovered)
+        {
+            if (string.IsNullOrWhiteSpace(sender.Name))
+                continue;
+
+            if (!string.IsNullOrEmpty(sender.Id) && _senderEventCache.TryGetValue(sender.Id, out var eventData))
+            {
+                lock (eventData)
+                {
+                    ApplySenderMonitoringEvents(sender, eventData);
+                }
+            }
+
+            sender.LastSeen = now;
+            _senders[sender.Name] = sender;
+            seen.Add(sender.Name);
+        }
+
+        TouchFinderVisibleSenders(seen, now);
+
+        foreach (var key in _senders.Keys.ToList())
+        {
+            if (seen.Contains(key))
+                continue;
+
+            if (now - _senders[key].LastSeen > SenderStaleGrace)
+                _senders.TryRemove(key, out _);
+        }
+    }
+
+    private void MergeDiscoveredReceivers(IReadOnlyList<NDIReceiverInfo> discovered)
+    {
+        var now = DateTime.UtcNow;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var receiver in discovered)
+        {
+            if (string.IsNullOrWhiteSpace(receiver.Id))
+                continue;
+
+            ApplyReceiverConnectionFromEvents(receiver);
+
+            if (_receiverEventCache.TryGetValue(receiver.Id, out var eventData))
+            {
+                lock (eventData)
+                {
+                    ApplyReceiverMonitoringEvents(receiver, eventData);
+                }
+            }
+
+            receiver.LastSeen = now;
+            _receivers[receiver.Id] = receiver;
+            seen.Add(receiver.Id);
+        }
+
+        foreach (var key in _receivers.Keys.ToList())
+        {
+            if (seen.Contains(key))
+                continue;
+
+            if (now - _receivers[key].LastSeen > ReceiverStaleGrace)
+                _receivers.TryRemove(key, out _);
+        }
+    }
+
+    /// <summary>
+    /// Refreshes LastSeen for senders still visible on the network via NDI Finder (avoids stale flapping).
+    /// </summary>
+    private void TouchFinderVisibleSenders(HashSet<string> seen, DateTime now)
+    {
+        foreach (var name in EnumerateFinderSourceNames())
+        {
+            foreach (var key in _senders.Keys)
+            {
+                if (!string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                _senders[key].LastSeen = now;
+                seen.Add(key);
+                break;
+            }
+        }
+    }
+
+    private IEnumerable<(string Name, string Url)> EnumerateFinderSources()
+    {
+        if (_finderInstance == IntPtr.Zero)
+            yield break;
+
+        NDI.NDIlib_find_wait_for_sources(_finderInstance, 0);
+
+        uint numSources = 0;
+        IntPtr sourcesPtr = NDI.NDIlib_find_get_current_sources(_finderInstance, ref numSources);
+        if (sourcesPtr == IntPtr.Zero || numSources == 0)
+            yield break;
+
+        int structSize = Marshal.SizeOf<NDI.source_t>();
+        for (int i = 0; i < numSources; i++)
+        {
+            IntPtr currentPtr = IntPtr.Add(sourcesPtr, i * structSize);
+            var source = Marshal.PtrToStructure<NDI.source_t>(currentPtr);
+            var sourceName = NdiStringUtil.PtrToUtf8String(source.p_ndi_name);
+            if (string.IsNullOrWhiteSpace(sourceName))
+                continue;
+
+            var sourceUrl = NdiStringUtil.PtrToUtf8String(source.p_url_address);
+            yield return (sourceName, sourceUrl);
+        }
+    }
+
+    private IEnumerable<string> EnumerateFinderSourceNames()
+    {
+        foreach (var (name, _) in EnumerateFinderSources())
+            yield return name;
+    }
+
+    /// <summary>
+    /// Adds NDI Finder sources not already registered on the Discovery Server Send Listener (legacy / pre-6.x senders).
+    /// </summary>
+    private int MergeFinderLegacySenders()
+    {
+        if (_finderInstance == IntPtr.Zero)
+            return 0;
+
+        NDI.NDIlib_find_wait_for_sources(_finderInstance, 250);
+
+        var added = 0;
+        var finderCount = 0;
+
+        foreach (var (sourceName, sourceUrl) in EnumerateFinderSources())
+        {
+            finderCount++;
+            if (_senders.Keys.Any(k => string.Equals(k, sourceName, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            ParseFinderSourceUrl(sourceUrl, out var address, out var port);
+
+            var legacySender = new NDISenderInfo
+            {
+                Id = BuildLegacySenderId(sourceName),
+                Name = sourceName,
+                Address = address,
+                HostName = address,
+                Port = port,
+                IsLegacyDiscovery = true,
+                LastSeen = DateTime.UtcNow,
+            };
+
+            _senders[sourceName] = legacySender;
+            added++;
+        }
+
+        _logger.LogDebug("NDI Finder enumerated {Count} network source(s)", finderCount);
+        return added;
+    }
+
+    private static string BuildLegacySenderId(string sourceName)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(sourceName.Trim()));
+        return "legacy:" + Convert.ToHexString(hash)[..16];
+    }
+
+    private static void ParseFinderSourceUrl(string? url, out string address, out int port)
+    {
+        address = string.Empty;
+        port = 0;
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        var trimmed = url.Trim();
+        var lastColon = trimmed.LastIndexOf(':');
+        if (lastColon > 0 && lastColon < trimmed.Length - 1)
+        {
+            var portPart = trimmed[(lastColon + 1)..];
+            if (int.TryParse(portPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedPort))
+            {
+                port = parsedPort;
+                address = trimmed[..lastColon].Trim();
+                return;
+            }
+        }
+
+        address = trimmed;
     }
 
     /// <summary>

@@ -245,8 +245,25 @@ export default function SenderNode({ data }) {
     return `Output ${String(safe).padStart(2, '0')}`;
   };
 
+  const getBridgeChannelLabel = (channel, idx) => {
+    if (channel?.upstreamLabel) return channel.upstreamLabel;
+    return getChannelConnectorLabel(channel, idx);
+  };
+
+  const formatCodecBadge = (codec) => {
+    if (!codec) return null;
+    return String(codec).toUpperCase();
+  };
+
   if (data?.isAggregated) {
     const channels = Array.isArray(data.channels) ? data.channels : [];
+    const isLegacy = data?.isLegacyDiscovery === true;
+    const isBridgeHub = data?.isBridgeHub === true;
+    const deviceScheme = isBridgeHub
+      ? COLOR_SCHEMES.orange
+      : isLegacy
+        ? COLOR_SCHEMES.gray
+        : COLOR_SCHEMES.green;
     const isCollapsed = data?.isCollapsed === true;
     const connectedChannelIds = data?.connectedChannelIds instanceof Set
       ? data.connectedChannelIds
@@ -273,10 +290,16 @@ export default function SenderNode({ data }) {
     const connectedRx = Math.max(ndiConnectedRx, Number(data.logicalConnectionCount) || 0);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
-    const appDisplayName = data.applicationId !== 'unknown'
-      ? data.applicationId
-      : (inferredDeviceName || data.displayName || 'unknown');
-    const appSubDisplayName = data.applicationId === 'unknown' ? inferredAppName : '';
+    const appDisplayName = isBridgeHub
+      ? `NDI Bridge · ${data.hostName || data.displayName || 'Bridge'}`
+      : data.applicationId !== 'unknown'
+        ? data.applicationId
+        : (inferredDeviceName || data.displayName || 'unknown');
+    const appSubDisplayName = isBridgeHub
+      ? `${channels.length} transcoded output${channels.length === 1 ? '' : 's'}`
+      : data.applicationId === 'unknown'
+        ? inferredAppName
+        : '';
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
     const totalDroppedFrames = sumDroppedFrames(channels);
@@ -284,20 +307,22 @@ export default function SenderNode({ data }) {
 
     if (data?.compactView) {
       const cardStyle = compactCardStyle({
-        border: COLOR_SCHEMES.green.border,
-        gradientFrom: COLOR_SCHEMES.green.gradient[0],
-        gradientTo: COLOR_SCHEMES.green.gradient[1],
+        border: deviceScheme.border,
+        gradientFrom: deviceScheme.gradient[0],
+        gradientTo: deviceScheme.gradient[1],
         handleSide: 'right',
       });
       return (
         <div style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
           <div {...nodeDragHandleProps(compactHeaderStyle())}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-              <div style={styles.indicator(COLOR_SCHEMES.green, streamingChannels.length > 0)} />
+              <div style={styles.indicator(deviceScheme, !isLegacy && streamingChannels.length > 0)} />
               <span>SENDER DEVICE</span>
+              {isBridgeHub ? <span style={{ fontSize: 9, color: '#fed7aa' }}>BRIDGE</span> : null}
+              {isLegacy ? <span style={{ fontSize: 9, color: '#fcd34d' }}>LEGACY</span> : null}
               {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
             </div>
-            <span style={styles.badge(COLOR_SCHEMES.green)}>{channels.length} ch</span>
+            <span style={styles.badge(deviceScheme)}>{channels.length} ch</span>
           </div>
           <div {...compactToggleTitleProps(data?.onToggleCompactView)}>{appDisplayName}</div>
           {appSubDisplayName ? (
@@ -315,15 +340,15 @@ export default function SenderNode({ data }) {
             handleType="source"
             position={Position.Right}
             connectedChannelIds={connectedChannelIds}
-            visibleHandleStyle={styles.channelHandle(COLOR_SCHEMES.green)}
-            getTitle={(channel, idx) => getChannelConnectorLabel(channel, idx)}
+            visibleHandleStyle={styles.channelHandle(deviceScheme)}
+            getTitle={(channel, idx) => (isBridgeHub ? getBridgeChannelLabel(channel, idx) : getChannelConnectorLabel(channel, idx))}
           />
         </div>
       );
     }
 
     return (
-      <div style={styles.node(COLOR_SCHEMES.green)}>
+      <div style={styles.node(deviceScheme)}>
         <style>{`
           @keyframes tallyPulse {
             0%, 100% { opacity: 1; }
@@ -332,13 +357,45 @@ export default function SenderNode({ data }) {
         `}</style>
         <div {...nodeDragHandleProps(styles.header)}>
           <div style={styles.headerLeft}>
-            <div style={styles.indicator(COLOR_SCHEMES.green, true)} />
+            <div style={styles.indicator(deviceScheme, !isLegacy)} />
             <span>SENDER DEVICE</span>
           </div>
-          <span style={styles.badge(COLOR_SCHEMES.green)}>
-            {channels.length} ch
+          <span style={styles.badge(deviceScheme)}>
+            {isBridgeHub ? `${channels.length} out` : `${channels.length} ch`}
           </span>
         </div>
+
+        {isBridgeHub && (
+          <div style={{
+            fontSize: '11px',
+            color: '#fed7aa',
+            backgroundColor: 'rgba(124, 45, 18, 0.45)',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            marginBottom: '8px',
+            textAlign: 'center',
+            fontWeight: 500,
+          }}
+          >
+            Transcoded outputs — drag to connect H.264/H.265 paths
+          </div>
+        )}
+
+        {isLegacy && (
+          <div style={{
+            fontSize: '11px',
+            color: '#fcd34d',
+            backgroundColor: 'rgba(120, 53, 15, 0.35)',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            marginBottom: '8px',
+            textAlign: 'center',
+            fontWeight: 500,
+          }}
+          >
+            Legacy source — connect only (no SDK monitoring)
+          </div>
+        )}
 
         {(() => {
           const titleToggleProps = detailedToggleTitleProps(data?.onToggleCompactView);
@@ -350,6 +407,21 @@ export default function SenderNode({ data }) {
         })()}
         {appSubDisplayName && (
           <div style={styles.appSubValue}>{appSubDisplayName}</div>
+        )}
+
+        {!isBridgeHub && data?.hasBridgeMirror && (
+          <div style={{
+            fontSize: '11px',
+            color: '#93c5fd',
+            backgroundColor: 'rgba(30, 58, 95, 0.45)',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            marginBottom: '8px',
+            textAlign: 'center',
+          }}
+          >
+            Bridge transcoded mirror available (connect via NDI Bridge hub)
+          </div>
         )}
 
         {(deviceTallyPgm || deviceTallyPvw) && (
@@ -389,69 +461,88 @@ export default function SenderNode({ data }) {
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '-'}</span>
           </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Connected RX:</span>
-            <button
-              type="button"
-              className="nodrag nopan"
-              onClick={(e) => {
-                e.stopPropagation();
-                data?.onFocusConnections?.();
-              }}
-              style={{
-                ...styles.value,
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                cursor: connectedRx > 0 ? 'pointer' : 'default',
-                color: connectedRx > 0 ? '#93c5fd' : '#e5e7eb',
-                textDecoration: connectedRx > 0 ? 'underline' : 'none',
-              }}
-              title={connectedRx > 0 ? 'Highlight connections' : undefined}
-            >
-              {connectedRx}
-            </button>
-          </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Active ch:</span>
-            <span style={styles.value}>{`${streamingChannels.length}/${channels.length}`}</span>
-          </div>
-          <div style={styles.infoRow}>
-            <span style={styles.label}>Dropped frames:</span>
-            <span style={{
-              ...styles.value,
-              color: totalDroppedFrames > 0 ? '#f87171' : undefined,
-            }}
-            >
-              {formatCount(totalDroppedFrames)}
-            </span>
-          </div>
-          {!isCollapsed && (
+          {!isLegacy && !isBridgeHub && (
             <>
               <div style={styles.infoRow}>
-                <span style={styles.label}>Video:</span>
-                <span style={styles.value}>{data.videoSummary || '-'}</span>
+                <span style={styles.label}>Connected RX:</span>
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    data?.onFocusConnections?.();
+                  }}
+                  style={{
+                    ...styles.value,
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: connectedRx > 0 ? 'pointer' : 'default',
+                    color: connectedRx > 0 ? '#93c5fd' : '#e5e7eb',
+                    textDecoration: connectedRx > 0 ? 'underline' : 'none',
+                  }}
+                  title={connectedRx > 0 ? 'Highlight connections' : undefined}
+                >
+                  {connectedRx}
+                </button>
               </div>
               <div style={styles.infoRow}>
-                <span style={styles.label}>Audio:</span>
-                <span style={styles.value}>{data.audioSummary || '-'}</span>
+                <span style={styles.label}>Active ch:</span>
+                <span style={styles.value}>{`${streamingChannels.length}/${channels.length}`}</span>
               </div>
               <div style={styles.infoRow}>
-                <span style={styles.label}>Res/FPS:</span>
-                <span style={styles.value}>{`${data.resolutionSummary || '-'} / ${data.frameRateSummary || '-'}`}</span>
+                <span style={styles.label}>Dropped frames:</span>
+                <span style={{
+                  ...styles.value,
+                  color: totalDroppedFrames > 0 ? '#f87171' : undefined,
+                }}
+                >
+                  {formatCount(totalDroppedFrames)}
+                </span>
               </div>
-              <div style={styles.infoRow}>
-                <span style={styles.label}>Ports:</span>
-                <span style={styles.value}>{data.portSummary || '-'}</span>
-              </div>
+              {!isCollapsed && (
+                <>
+                  <div style={styles.infoRow}>
+                    <span style={styles.label}>Video:</span>
+                    <span style={styles.value}>{data.videoSummary || '-'}</span>
+                  </div>
+                  <div style={styles.infoRow}>
+                    <span style={styles.label}>Audio:</span>
+                    <span style={styles.value}>{data.audioSummary || '-'}</span>
+                  </div>
+                  <div style={styles.infoRow}>
+                    <span style={styles.label}>Res/FPS:</span>
+                    <span style={styles.value}>{`${data.resolutionSummary || '-'} / ${data.frameRateSummary || '-'}`}</span>
+                  </div>
+                  <div style={styles.infoRow}>
+                    <span style={styles.label}>Ports:</span>
+                    <span style={styles.value}>{data.portSummary || '-'}</span>
+                  </div>
+                </>
+              )}
             </>
+          )}
+          {isLegacy && (
+            <div style={styles.infoRow}>
+              <span style={styles.label}>Monitoring:</span>
+              <span style={styles.value}>Unavailable (pre-NDI 6 sender)</span>
+            </div>
+          )}
+          {isBridgeHub && (
+            <div style={styles.infoRow}>
+              <span style={styles.label}>Monitoring:</span>
+              <span style={styles.value}>Per-output (transcoded)</span>
+            </div>
           )}
         </div>
 
         {visibleChannels.map((channel, idx) => {
           const pgm = channelTallyProgram(channel);
           const pvw = channelTallyPreview(channel);
-          const label = getChannelConnectorLabel(channel, idx);
+          const label = isBridgeHub
+            ? getBridgeChannelLabel(channel, idx)
+            : getChannelConnectorLabel(channel, idx);
+          const codecBadge = formatCodecBadge(channel.videoCodec);
           const warning = channelHealthWarning(channel);
           return (
             <div
@@ -479,19 +570,46 @@ export default function SenderNode({ data }) {
                   {pvw && <span style={tallyChip.pvw}>PVW</span>}
                 </div>
               )}
-              <span style={styles.channelRowLabel}>{label}</span>
+              {codecBadge ? (
+                <span style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: '#ffedd5',
+                  backgroundColor: 'rgba(194, 65, 12, 0.55)',
+                  padding: '1px 4px',
+                  borderRadius: 3,
+                  flexShrink: 0,
+                }}
+                >
+                  {codecBadge}
+                </span>
+              ) : null}
+              <span style={{
+                ...styles.channelRowLabel,
+                maxWidth: isBridgeHub ? 200 : undefined,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              >
+                {label}
+              </span>
+              {!isBridgeHub && channel.hasBridgeMirror ? (
+                <span style={{ fontSize: 9, color: '#93c5fd', flexShrink: 0 }} title={channel.bridgeMirrorLabel || 'On Bridge'}>
+                  → Bridge
+                </span>
+              ) : null}
               <Handle
                 id={`out-${channel.channelId}`}
                 type="source"
                 position={Position.Right}
-                style={styles.channelHandle(COLOR_SCHEMES.green)}
+                style={styles.channelHandle(deviceScheme)}
                 title={label}
               />
             </div>
           );
         })}
 
-        {!isCollapsed && (
+        {!isCollapsed && !isLegacy && !isBridgeHub && (
           <SenderStatsSections
             channels={channels}
             getChannelLabel={getChannelConnectorLabel}

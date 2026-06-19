@@ -2,7 +2,7 @@
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
-**Current release:** version **3.0** — self-contained installer, no separate .NET runtime required.
+**Current release:** version **3.1** — self-contained installer, no separate .NET runtime required.
 
 Repository: https://github.com/NDIConnected/ndi-utils-manager
 
@@ -16,7 +16,7 @@ The published installer bundles the .NET runtime. End users do **not** need to i
 
 ## Quick start (installed app)
 
-1. Run **`NDIManager-v3.0-Setup.exe`** from `Output\` (after building the installer) or your release package.  
+1. Run **`NDIManager-v3.1-Setup.exe`** from `Output\` (after building the installer) or your release package.  
 2. Use the **system tray** icon → **Open Web UI** (default `http://localhost:5000`).  
 3. Drag connections on the **Canvas** tab; use **Table** for a receiver list.
 
@@ -56,15 +56,13 @@ dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
 
 Details: [INSTALLER_README.md](INSTALLER_README.md).
 
-## What's new in 3.0 (summary)
+## What's new in 3.1 (summary)
 
-- **Per-device compact view** — click a device **name** to toggle compact ↔ detailed (saved per device).  
-- **Drag handle** — move nodes from the **header bar** (`SENDER DEVICE` / `RECEIVER DEVICE`).  
-- **Instant connection lines** — optimistic edges; select and disconnect without waiting for NDI confirm.  
-- **Auto layout** — stacked layout with post-render height measurement (no overlapping nodes on first load).  
-- **Tray menu in English**; disconnect **balloon notifications removed**.  
-- **Self-contained publish** — fixed installer/runtime dependency issues.
-- **Multi-host filter** — Ctrl+Click hosts in the sidebar to combine machines on the canvas and in the table.
+- **NDI Bridge hub** — republished outputs on bridge machines collapse into one node; direct SHQ sources show `→ Bridge` pairing.  
+- **Legacy sender discovery** — NDI Finder sources for pre-6.x senders (connect-only, gray **LEGACY** badge).  
+- **Canvas stability** — fixed cyclic flicker on Bridge-heavy networks.  
+- **Per-device compact view**, **drag handle**, **instant connection lines**, **multi-host filter** (Ctrl+Click).  
+- **Self-contained installer** — no separate .NET runtime on target PCs.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
 

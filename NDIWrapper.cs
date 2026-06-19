@@ -284,6 +284,10 @@ public static class NDI
     public static extern void NDIlib_find_destroy(IntPtr p_instance);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool NDIlib_find_wait_for_sources(IntPtr p_instance, uint timeout_in_ms);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_find_get_current_sources(IntPtr p_instance, ref uint p_no_sources);
 
     // Receiver API

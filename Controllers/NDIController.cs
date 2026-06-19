@@ -204,6 +204,7 @@ public class NDIController : ControllerBase
             status = status.Health,
             timestamp = DateTime.UtcNow,
             senderCount = status.SenderCount,
+            legacySenderCount = status.LegacySenderCount,
             receiverCount = status.ReceiverCount,
             sendListenerConnected = status.SendListenerConnected,
             recvListenerConnected = status.RecvListenerConnected,

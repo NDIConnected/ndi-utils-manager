@@ -1,5 +1,25 @@
 # NDI Manager 6.3 - Changelog
 
+## [Version 3.1] - 2026-06-16
+
+### Web UI
+
+- **Legacy sender discovery** — NDI Finder merges pre-NDI 6 / non-Discovery-Server sources for connect-only routing (no codec/tally monitoring on those senders); legacy nodes shown in gray with **LEGACY** badge.
+- **NDI Bridge hub** — republished outputs on bridge hosts (e.g. `7010-01-BRIDGE`) collapse into one orange hub node; upstream pairing shows `→ Bridge` on direct SHQ sources; hub collapsed by default when multiple channels.
+- **Canvas stability** — fixed cyclic flicker on Bridge-heavy networks: structural vs metrics-only snapshot updates, layout position ref (no rebuild loop), empty-snapshot guard, snapshot debounce.
+
+### Backend
+
+- **Discovery merge** — senders/receivers merged across cycles with stale grace (10s senders, 3s receivers) instead of full clear; Finder keeps visible sources alive.
+- **`BridgeRouting`** — hub consolidation, upstream pairing, stable `bridge:` channel handle IDs, legacy stream host normalization for bridge machines.
+- NDI Finder wait API (`NDIlib_find_wait_for_sources`) for legacy source enumeration.
+
+### Desktop / installer
+
+- Application version **3.1.0**; installer **3.1** (`NDIManager-v3.1-Setup.exe`).
+
+---
+
 ## [Version 3.0] - 2026-06-19
 
 ### Web UI

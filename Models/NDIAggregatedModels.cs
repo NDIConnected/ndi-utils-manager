@@ -23,6 +23,10 @@ public class NDIMultiDevice
     public string ResolutionSummary { get; set; } = "-";
     public string FrameRateSummary { get; set; } = "-";
     public string PortSummary { get; set; } = "-";
+    /// <summary>All channels from NDI Finder (no Send Listener monitoring).</summary>
+    public bool IsLegacyDiscovery { get; set; }
+    public bool IsBridgeHub { get; set; }
+    public bool HasBridgeMirror { get; set; }
     public int ChannelCount => Channels.Count;
     public List<NDIMultiChannel> Channels { get; set; } = new();
 }
@@ -35,6 +39,12 @@ public class NDIMultiChannel
     public string EndpointUuid { get; set; } = string.Empty;
     public string EndpointName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty; // sender | receiver
+    public bool IsLegacyDiscovery { get; set; }
+    public bool IsBridgeOutput { get; set; }
+    public string UpstreamKey { get; set; } = string.Empty;
+    public string UpstreamLabel { get; set; } = string.Empty;
+    public bool HasBridgeMirror { get; set; }
+    public string BridgeMirrorLabel { get; set; } = string.Empty;
     public bool IsConnected { get; set; }
     public int ConnectionCount { get; set; }
     public bool IsStreaming { get; set; }

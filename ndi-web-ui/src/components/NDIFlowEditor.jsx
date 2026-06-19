@@ -142,6 +142,9 @@ const styles = {
 };
 
 function mergeNodes(prevNodes, nextNodes, draggingNodeIds) {
+  if (nextNodes.length === 0 && prevNodes.length > 0) {
+    return prevNodes;
+  }
   const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
   return nextNodes.map((node) => {
     const prev = prevMap.get(node.id);
@@ -155,11 +158,40 @@ function mergeNodes(prevNodes, nextNodes, draggingNodeIds) {
 }
 
 function mergeEdges(prevEdges, nextEdges) {
+  if (nextEdges.length === 0 && prevEdges.length > 0) {
+    return prevEdges;
+  }
   const prevMap = new Map(prevEdges.map((e) => [e.id, e]));
   return nextEdges.map((edge) => ({
     ...edge,
     selected: prevMap.get(edge.id)?.selected ?? false,
   }));
+}
+
+function buildCanvasStructureKey({
+  filteredSenders,
+  filteredReceivers,
+  visibleConnections,
+  selectedHostKeys,
+  senderFilter,
+  receiverFilter,
+  showActiveOnly,
+  expandedDeviceKeys,
+  compactDeviceKeys,
+}) {
+  const senderPart = filteredSenders
+    .map((d) => `${d.deviceKey}:${d.isBridgeHub ? 'hub' : 'dev'}:${(d.channels || []).map((c) => c.channelId).join(',')}`)
+    .join('|');
+  const receiverPart = filteredReceivers
+    .map((d) => `${d.deviceKey}:${(d.channels || []).map((c) => c.channelId).join(',')}`)
+    .join('|');
+  const connPart = visibleConnections
+    .map((c) => `${c.connectionId}:${c.senderChannelId}:${c.receiverChannelId}`)
+    .join('|');
+  const hostPart = [...selectedHostKeys].sort().join(',');
+  const expandPart = [...expandedDeviceKeys].sort().join(',');
+  const compactPart = [...compactDeviceKeys].sort().join(',');
+  return `${senderPart}::${receiverPart}::${connPart}::${hostPart}::${senderFilter}::${receiverFilter}::${showActiveOnly}::${expandPart}::${compactPart}`;
 }
 
 function buildDeviceSearchText(device) {
@@ -295,6 +327,9 @@ export default function NDIFlowEditor() {
   const draggingNodeIdsRef = useRef(new Set());
   const layoutSeededRef = useRef(false);
   const userLayoutRef = useRef(false);
+  const nodePositionsRef = useRef({});
+  const canvasStructureKeyRef = useRef('');
+  const snapshotDebounceRef = useRef(null);
   const [autoMeasureLayout, setAutoMeasureLayout] = useState(() => {
     try {
       if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return true;
@@ -320,6 +355,10 @@ export default function NDIFlowEditor() {
       return {};
     }
   });
+
+  useEffect(() => {
+    nodePositionsRef.current = nodePositions;
+  }, [nodePositions]);
 
   const nodeTypes = useMemo(() => ({ senderNode: SenderNode, receiverNode: ReceiverNode }), []);
   const edgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
@@ -382,12 +421,22 @@ export default function NDIFlowEditor() {
 
   const applySnapshotPayload = useCallback((data) => {
     if (!data) return;
-    setSnapshot({
-      senders: Array.isArray(data.senders) ? data.senders : [],
-      receivers: Array.isArray(data.receivers) ? data.receivers : [],
-      connections: Array.isArray(data.connections) ? data.connections : [],
-    });
-    setError(null);
+    if (snapshotDebounceRef.current) {
+      clearTimeout(snapshotDebounceRef.current);
+    }
+    snapshotDebounceRef.current = setTimeout(() => {
+      snapshotDebounceRef.current = null;
+      setSnapshot({
+        senders: Array.isArray(data.senders) ? data.senders : [],
+        receivers: Array.isArray(data.receivers) ? data.receivers : [],
+        connections: Array.isArray(data.connections) ? data.connections : [],
+      });
+      setError(null);
+    }, 80);
+  }, []);
+
+  useEffect(() => () => {
+    if (snapshotDebounceRef.current) clearTimeout(snapshotDebounceRef.current);
   }, []);
 
   const fetchStatus = useCallback(async () => {
@@ -490,6 +539,7 @@ export default function NDIFlowEditor() {
   }, []);
 
   const persistPositions = useCallback((positions) => {
+    nodePositionsRef.current = positions;
     setNodePositions(positions);
     localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(positions));
   }, []);
@@ -614,6 +664,7 @@ export default function NDIFlowEditor() {
           setAutoMeasureLayout(false);
           setNodePositions((prev) => {
             const updated = { ...prev, [change.id]: change.position };
+            nodePositionsRef.current = updated;
             localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(updated));
             return updated;
           });
@@ -631,7 +682,7 @@ export default function NDIFlowEditor() {
     ];
     if (nodeIds.length === 0) return;
 
-    const validSaved = nodeIds.filter((id) => isValidSavedPosition(nodePositions[id])).length;
+    const validSaved = nodeIds.filter((id) => isValidSavedPosition(nodePositionsRef.current[id])).length;
 
     if (!layoutSeededRef.current && validSaved === 0) {
       layoutSeededRef.current = true;
@@ -643,14 +694,14 @@ export default function NDIFlowEditor() {
 
     if (validSaved < nodeIds.length) {
       const merged = mergeLayoutWithNewDevices(
-        nodePositions,
+        nodePositionsRef.current,
         snapshot.senders,
         snapshot.receivers,
         expandedDeviceKeys,
         compactDeviceKeys,
       );
       const changed = nodeIds.some((id) => {
-        const before = nodePositions[id];
+        const before = nodePositionsRef.current[id];
         const after = merged[id];
         if (!isValidSavedPosition(before)) return after != null;
         return before.x !== after?.x || before.y !== after?.y;
@@ -664,7 +715,6 @@ export default function NDIFlowEditor() {
     snapshot.senders,
     snapshot.receivers,
     expandedDeviceKeys,
-    nodePositions,
     persistPositions,
     compactDeviceKeys,
   ]);
@@ -889,7 +939,7 @@ export default function NDIFlowEditor() {
 
     const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
     const resolvePosition = (nodeId) => {
-      const saved = nodePositions[nodeId];
+      const saved = nodePositionsRef.current[nodeId];
       if (isValidSavedPosition(saved)) return saved;
       return stackedLayout[nodeId] || { x: 80, y: 120 };
     };
@@ -897,7 +947,9 @@ export default function NDIFlowEditor() {
     const buildNodeData = (device, rolePrefix) => {
       const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
       const channelCount = device.channels?.length || 0;
-      const isCollapsed = channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
+      const isCollapsed = device.isBridgeHub
+        ? (channelCount > 1 ? !expandedDeviceKeys.has(nodeId) : false)
+        : channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
       return {
         ...device,
         isAggregated: true,
@@ -955,6 +1007,20 @@ export default function NDIFlowEditor() {
     });
 
     const nextNodes = [...senderNodes, ...receiverNodes];
+    const structureKey = buildCanvasStructureKey({
+      filteredSenders,
+      filteredReceivers,
+      visibleConnections,
+      selectedHostKeys,
+      senderFilter,
+      receiverFilter,
+      showActiveOnly,
+      expandedDeviceKeys,
+      compactDeviceKeys,
+    });
+    const structureChanged = structureKey !== canvasStructureKeyRef.current;
+    canvasStructureKeyRef.current = structureKey;
+
     const groupedConnections = new Map();
     visibleConnections.forEach((conn) => {
       const pairKey = `${conn.senderDeviceKey}->${conn.receiverDeviceKey}`;
@@ -1012,12 +1078,31 @@ export default function NDIFlowEditor() {
       });
     });
 
+    if (!structureChanged) {
+      setNodes((prev) => {
+        if (prev.length === 0 && nextNodes.length > 0) return nextNodes;
+        const nextById = new Map(nextNodes.map((n) => [n.id, n]));
+        return prev.map((node) => {
+          const fresh = nextById.get(node.id);
+          if (!fresh) return node;
+          const keepDragPosition = node.position && draggingNodeIdsRef.current.has(node.id);
+          return {
+            ...node,
+            data: fresh.data,
+            position: keepDragPosition ? node.position : fresh.position,
+          };
+        });
+      });
+      setEdges((prev) => mergeEdges(prev, nextEdges));
+      if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
+      return;
+    }
+
     setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current));
     setEdges((prev) => mergeEdges(prev, nextEdges));
     if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
   }, [
     snapshot,
-    nodePositions,
     setNodes,
     setEdges,
     isFirstLoad,
@@ -1238,7 +1323,7 @@ export default function NDIFlowEditor() {
 
       <div style={styles.footer}>
         <span>
-          v{systemStatus?.appVersion || '3.0.0'}
+          v{systemStatus?.appVersion || '3.1.0'}
           {systemStatus?.lastDiscoveryAt
             ? ` · updated ${new Date(systemStatus.lastDiscoveryAt).toLocaleTimeString('en-US')}`
             : ''}

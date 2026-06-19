@@ -1,19 +1,22 @@
 # NDI Manager 6.3 - Installer Build Instructions
 
-## Version 3.0
+## Version 3.1
 
 ## Overview
 
 This document describes how to build and package the standalone desktop/tray version of NDI Manager using Inno Setup.
 
-## Key Release Notes (v3.0)
+## Key Release Notes (v3.1)
 
+- **NDI Bridge hub** — bridge hosts collapse republished outputs into one canvas node; upstream pairing for direct SHQ paths
+- **Legacy sender discovery** — NDI Finder sources for pre-6.x senders (connect-only)
+- **Canvas flicker fix** — stable discovery merge and incremental UI updates on Bridge-heavy networks
 - Web UI v3.0: per-device compact view, drag handle, instant connection select/disconnect, layout fixes, **multi-host sidebar** (Ctrl+Click)
 - Standalone WinForms tray application (not a Windows Service)
 - **Self-contained** `.NET 9` publish for `win-x64` — **no separate .NET install** on target machines
 - Tray menu in English; disconnect balloon notifications removed
 - **Installer license aligned with NDI GPIO Panel:** MIT License + NDI SDK installer notice (`LICENSE`, `INSTALLER-NOTICE.txt`); notice text uses ASCII + CRLF for correct display in the wizard
-- Installer output: `Output\NDIManager-v3.0-Setup.exe`
+- Installer output: `Output\NDIManager-v3.1-Setup.exe`
 - Unified icon branding with `MAN_icon.ico` for installer, application, and tray
 
 ## Prerequisites
@@ -71,7 +74,7 @@ Verify `publish\NDIManager.runtimeconfig.json` contains `"includedFrameworks"` (
 
 Result:
 
-- `Output\NDIManager-v3.0-Setup.exe`
+- `Output\NDIManager-v3.1-Setup.exe`
 
 ## Installer Behavior
 
