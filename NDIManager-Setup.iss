@@ -5,8 +5,9 @@
 #define MyAppVersion "3.2"
 #define MyAppPublisher "Vizrt NDI AB"
 #define MyAppExeName "NDIManager.exe"
-#define MyLicenseFile "License\LICENSE"
+#define MyLicenseFile "LICENSE"
 #define MyDisclaimerFile "INSTALLER-NOTICE.txt"
+#define MyAppRoot "."
 
 [Setup]
 AppId={{E7F3C4A9-8D2B-4F1E-9A3C-5B6D7E8F9A0B}
@@ -38,10 +39,14 @@ Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs creat
 Source: "ThirdPartyLicenses\*"; DestDir: "{app}\ThirdPartyLicenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Installer notice (extracted for custom wizard page)
 Source: "{#MyDisclaimerFile}"; DestName: "INSTALLER-NOTICE.txt"; Flags: dontcopy
-; License files (same layout as NDI GPIO Panel)
+; License files (same layout as sibling NDI utils samples)
+Source: "{#MyDisclaimerFile}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppRoot}\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppRoot}\Processing.NDI.Lib.Licenses.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyLicenseFile}"; DestDir: "{app}\Licenses"; DestName: "LICENSE"; Flags: ignoreversion
 Source: "{#MyDisclaimerFile}"; DestDir: "{app}\Licenses"; DestName: "INSTALLER-NOTICE.txt"; Flags: ignoreversion
-Source: "License\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}\Licenses"; Flags: ignoreversion
+Source: "{#MyAppRoot}\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}\Licenses"; DestName: "THIRD-PARTY-LICENSES.txt"; Flags: ignoreversion
+Source: "{#MyAppRoot}\Processing.NDI.Lib.Licenses.txt"; DestDir: "{app}\Licenses"; DestName: "Processing.NDI.Lib.Licenses.txt"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\wwwroot"; Permissions: users-modify

@@ -1,10 +1,14 @@
 # NDI Manager
 
+> **Sample / reference software.** NDI Manager is an MIT-licensed community sample, **not officially supported** as a production product. The Web UI / API and NDI routing controls are intended for **trusted local networks**. See [SECURITY.md](SECURITY.md) before deploying on shared networks.
+
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
-**Current release:** version **3.2** — self-contained installer, no separate .NET runtime required.
-
-Repository: https://github.com/NDIConnected/ndi-utils-manager
+**Version:** 3.2  
+**Platform:** Windows 10/11 x64  
+**.NET:** 9.0 (self-contained installer)  
+**Status:** Sample / R&D release  
+**Repository:** [NDIConnected/ndi-utils-manager](https://github.com/NDIConnected/ndi-utils-manager)
 
 ## Requirements
 
@@ -73,19 +77,23 @@ See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [SECURITY.md](SECURITY.md) | Sample notice, network trust model, vulnerability reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Build, PRs, issue reporting |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) | User manual |
+
 ## License
 
-Application source code is licensed under the [MIT License](License/LICENSE) (Copyright © 2026 Vizrt NDI AB), same as [NDI GPIO Panel](https://github.com/NDIConnected/ndi-gpio).
+MIT License — Copyright (c) 2026 Vizrt NDI AB. See [LICENSE](LICENSE) (also in `Licenses/LICENSE`).
 
-The installer shows [INSTALLER-NOTICE.txt](INSTALLER-NOTICE.txt) (NDI SDK runtime and trademark notice), then the MIT license. Installed copies are placed under `{app}\Licenses\` together with [License/THIRD_PARTY_LICENSES.txt](License/THIRD_PARTY_LICENSES.txt) and [ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt](ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt).
+Third-party components are listed in [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt). Web UI dependency notices are also under [ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt](ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt). When redistributing the NDI runtime DLL, also include [Processing.NDI.Lib.Licenses.txt](Processing.NDI.Lib.Licenses.txt). The NDI logo and NDI® trademark are **not** covered by MIT.
 
-The bundled `Processing.NDI.Lib.x64.dll` is **not** covered by MIT; it is subject to the NDI SDK license from Vizrt NDI AB.
-
-## Further documentation
-
-- [DOCS/USER_MANUAL.md](DOCS/USER_MANUAL.md) — **User manual** (installation, Web UI, NDI Bridge hub, legacy senders, connections, troubleshooting)
-- [DOCS/](DOCS/) — implementation notes and guides  
-- [CHANGELOG.md](CHANGELOG.md)
+The installer shows [INSTALLER-NOTICE.txt](INSTALLER-NOTICE.txt) (NDI SDK runtime and trademark notice), then the MIT license. Installed copies include license files under `{app}` and `{app}\Licenses\`.
 
 ## Layout (simplified)
 
@@ -97,3 +105,4 @@ The bundled `Processing.NDI.Lib.x64.dll` is **not** covered by MIT; it is subjec
 | `publish/` | Self-contained release output for the installer |
 | `scripts/publish-standalone.ps1` | Publish helper (self-contained win-x64) |
 | `NDIManager-Setup.iss` | Inno Setup installer script |
+| `Licenses/` | MIT + third-party + NDI SDK notices |

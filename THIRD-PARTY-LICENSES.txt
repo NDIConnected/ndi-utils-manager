@@ -1,0 +1,116 @@
+THIRD-PARTY SOFTWARE LICENSES
+NDI Manager
+
+NDI Manager application source code is licensed under the MIT License — see
+LICENSE (Copyright (c) 2026 Vizrt NDI AB).
+
+This document lists third-party libraries and components bundled with or used by
+the application, each subject to its own license terms:
+
+================================================================================
+
+1. .NET 9 Desktop Runtime / ASP.NET Core (self-contained publish)
+   Copyright (c) Microsoft Corporation
+   Licensed under the MIT License
+   Source: https://github.com/dotnet/runtime
+
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) .NET Foundation and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+2. NDI SDK 6 (Network Device Interface)
+   Copyright (c) Vizrt NDI AB
+   Proprietary License
+   Source: https://ndi.video
+   NDI SDK license: http://ndi.link/ndisdk_license
+
+--------------------------------------------------------------------------------
+
+This application is developed by Vizrt NDI AB. The NDI SDK runtime
+(Processing.NDI.Lib.x64.dll) is subject to the NDI SDK license terms
+(separate from the MIT license for NDI Manager application code).
+
+Full NDI SDK license text, copyright notices for third-party libraries
+bundled inside the NDI runtime (RapidJSON, SpeexDSP, RapidXML, CxxUrl,
+ASIO, MsQuic, Opus, and others), and links to the online NDI license are
+in Processing.NDI.Lib.Licenses.txt. That file must accompany any
+redistribution of the NDI binary, as required by the NDI SDK.
+
+NDI® is a registered trademark of Vizrt NDI AB.
+
+For technical support and documentation:
+https://docs.ndi.video/
+
+================================================================================
+
+3. Web UI dependencies (React, Vite, Axios, @xyflow/react, and related packages)
+
+Additional npm / NuGet dependency notices shipped with the installer are in
+ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt.
+
+================================================================================
+
+NDI REDISTRIBUTION & TRADEMARK (for installers and forks)
+
+- Installers built from this repository may bundle Processing.NDI.Lib.x64.dll
+  (Windows). That native runtime is **not** MIT-licensed; it is subject to the
+  NDI SDK license (http://ndi.link/ndisdk_license). Ship
+  Processing.NDI.Lib.Licenses.txt with the NDI binary.
+- Forks that ship installers inherit the obligation to include NDI SDK
+  attribution, Processing.NDI.Lib.Licenses.txt, and forward the NDI EULA/terms
+  to end users
+- NDI® is a registered trademark of Vizrt NDI AB. Use of the name and logo
+  requires compliance with Vizrt trademark guidelines
+- App icons / NDI brand marks used in this sample are **excluded** from the MIT
+  grant — forks must not assume they may reuse branding without separate
+  authorization
+
+================================================================================
+
+ADDITIONAL NOTICES
+
+Operating System APIs:
+This software uses Windows operating system APIs (WinForms tray host / Win32)
+and HTTP localhost APIs, which are part of the Windows operating system and
+subject to Microsoft's Windows license terms.
+
+================================================================================
+
+COMPLIANCE NOTICE
+
+By using NDI Manager, you agree to comply with all applicable third-party
+license terms listed above. Failure to comply with these license terms may
+result in legal liability.
+
+For questions regarding third-party licenses, please contact the respective
+copyright holders directly.
+
+================================================================================
+
+This document applies to NDI Manager v3.2
+Last updated: July 2026
+
+Copyright (c) 2026 Vizrt NDI AB
+NDI Manager is MIT-licensed application software — see LICENSE

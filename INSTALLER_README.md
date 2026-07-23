@@ -114,7 +114,8 @@ Result:
 └── Licenses\
     ├── LICENSE
     ├── INSTALLER-NOTICE.txt
-    └── THIRD_PARTY_LICENSES.txt
+    ├── THIRD-PARTY-LICENSES.txt
+    └── Processing.NDI.Lib.Licenses.txt
 ```
 
 User settings (HTTP port only): `%LocalAppData%\NDIManager\settings.json`

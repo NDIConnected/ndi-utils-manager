@@ -1,5 +1,14 @@
 # NDI Manager - Changelog
 
+## [Version 3.2.1] - 2026-07
+
+### Docs / licensing
+
+- Community docs aligned with other NDI samples: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, GitHub PR template.
+- `Processing.NDI.Lib.Licenses.txt` (NDI SDK third-party notices) shipped with the installer alongside the NDI runtime DLL.
+- Root `THIRD-PARTY-LICENSES.txt` (hyphenated naming); `License\` folder renamed to `Licenses\`.
+- Repository retargeted to **NDIConnected/ndi-utils-manager**; installer notice references `http://ndi.link/ndisdk_license`.
+
 ## [Version 3.2] - 2026-06-16
 
 ### Web UI
