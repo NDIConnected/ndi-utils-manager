@@ -1,19 +1,18 @@
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
-import { formatCount, channelStat } from '../utils/formatStats';
+import { formatCount } from '../utils/formatStats';
 import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import SenderStatsSections from './SenderStatsSections';
+import { HiddenChannelHandles, CompactStackedHandles } from './CompactNodeParts';
 import {
-  HiddenChannelHandles,
-  CompactStackedHandles,
   compactCardStyle,
   compactHeaderStyle,
   compactAddressRowStyle,
   compactToggleTitleProps,
   detailedToggleTitleProps,
   nodeDragHandleProps,
-} from './CompactNodeParts';
+} from './compactNodeHelpers';
 
 const tallyChip = {
   pgm: {
@@ -212,21 +211,6 @@ const styles = {
 };
 
 function SenderNode({ data }) {
-  const getChannelDisplayLabel = (label, fallback) => {
-    const raw = (label || fallback || '').trim();
-    const withoutBracketMetadata = raw.replace(/\s*\[.*$/, '').trim();
-    const parenStart = withoutBracketMetadata.indexOf('(');
-    if (parenStart >= 0) {
-      const candidate = withoutBracketMetadata
-        .slice(parenStart + 1)
-        .replace(/\)\s*$/, '')
-        .trim();
-      if (candidate) return candidate;
-    }
-
-    return (withoutBracketMetadata || fallback || '').trim();
-  };
-
   const splitDeviceAndAppNames = (label) => {
     const raw = (label || '').trim().replace(/\s*\[.*$/, '').trim();
     if (!raw) return { deviceName: '', appName: '' };

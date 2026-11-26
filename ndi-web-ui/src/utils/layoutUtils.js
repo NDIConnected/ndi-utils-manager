@@ -178,10 +178,6 @@ function stackDevices(devices, rolePrefix, x, expandedDeviceKeys, compactDeviceK
   );
 }
 
-function resolveHostKey(device) {
-  return layoutHostKey(device);
-}
-
 function sortHostDevices(devices) {
   return [...devices].sort((a, b) => {
     const bridgeDelta = Number(a?.isBridgeHub === true) - Number(b?.isBridgeHub === true);
