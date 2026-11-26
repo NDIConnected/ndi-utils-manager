@@ -130,3 +130,16 @@ export function compactAddressRowStyle() {
     color: '#d1d5db',
   };
 }
+
+/**
+ * Machine (PC / hardware device) publishing the NDI endpoints: the "HOST" part of "HOST (App)".
+ * Prefers the raw prefix of the stream name (keeps spaces/case) over the backend's sanitized hostName.
+ * Returns '' when unknown, for Bridge hubs (the title already names the bridge host) or when it would repeat the title.
+ */
+export function resolveMachineName(data, inferredDeviceName, title) {
+  if (data?.isBridgeHub) return '';
+  const name = (inferredDeviceName || data?.hostName || '').trim();
+  if (!name || name.toLowerCase() === 'unknown') return '';
+  if (name.localeCompare((title || '').trim(), undefined, { sensitivity: 'accent' }) === 0) return '';
+  return name;
+}

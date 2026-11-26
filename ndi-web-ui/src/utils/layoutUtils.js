@@ -34,7 +34,8 @@ export function estimateAggregatedNodeHeight(
   if (channelCount === 0) return compactView ? 120 : 220;
 
   if (compactView) {
-    const cardBody = 118 + (device?.applicationId === 'unknown' ? 14 : 0);
+    // Header + title + Host + Address rows (+ app sub-line when the app is not identified).
+    const cardBody = 136 + (device?.applicationId === 'unknown' ? 14 : 0);
     return Math.max(cardBody, 120);
   }
 
