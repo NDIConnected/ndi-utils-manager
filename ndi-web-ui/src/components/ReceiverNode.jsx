@@ -1,9 +1,11 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 import { formatCount } from '../utils/formatStats';
 import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import ReceiverStatsSections from './ReceiverStatsSections';
 import {
+  HiddenChannelHandles,
   CompactStackedHandles,
   compactCardStyle,
   compactHeaderStyle,
@@ -199,7 +201,7 @@ const styles = {
   },
 };
 
-export default function ReceiverNode({ data }) {
+function ReceiverNode({ data }) {
   const getChannelDisplayLabel = (label, fallback) => {
     const raw = (label || fallback || '').trim();
     const withoutBracketMetadata = raw.replace(/\s*\[.*$/, '').trim();
@@ -319,16 +321,6 @@ export default function ReceiverNode({ data }) {
 
     return (
       <div style={styles.node(hasActivity)}>
-        <style>{`
-          @keyframes tallyPulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.55; }
-          }
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-          }
-        `}</style>
         <div {...nodeDragHandleProps(styles.header)}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(hasActivity)} />
@@ -499,6 +491,17 @@ export default function ReceiverNode({ data }) {
         )}
 
         {isCollapsed && hiddenChannelCount > 0 && (
+          <div style={{ position: 'relative' }}>
+          {/* Connected channels that are not listed still need a handle, or their edges are not drawn. */}
+          <HiddenChannelHandles
+            channels={channels}
+            visibleChannels={visibleChannels}
+            connectedChannelIds={connectedChannelIds}
+            prefix="in"
+            handleType="target"
+            position={Position.Left}
+            handleStyle={styles.channelHandle}
+          />
           <button
             type="button"
             className="nodrag nopan"
@@ -519,6 +522,7 @@ export default function ReceiverNode({ data }) {
           >
             +{hiddenChannelCount} channels — expand
           </button>
+          </div>
         )}
 
         {!isCollapsed && channels.length > COLLAPSE_CHANNELS_THRESHOLD && (
@@ -585,16 +589,6 @@ export default function ReceiverNode({ data }) {
 
   return (
     <div style={styles.node(isConnected)}>
-      <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: .5;
-          }
-        }
-      `}</style>
 
       {(tallyOnProgram || tallyOnPreview) && (
         <div style={{
@@ -702,3 +696,6 @@ export default function ReceiverNode({ data }) {
     </div>
   );
 }
+
+// Re-render only when React Flow passes new props (node data is kept stable when unchanged).
+export default memo(ReceiverNode);

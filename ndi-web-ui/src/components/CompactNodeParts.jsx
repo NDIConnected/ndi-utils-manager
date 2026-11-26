@@ -12,6 +12,35 @@ export function pickPrimaryCompactChannel(channels, connectedChannelIds = new Se
   );
 }
 
+/**
+ * Invisible, non-connectable handles for connected channels that a collapsed node does not list,
+ * anchored where the "+N channels" button is, so their edges are still drawn.
+ */
+export function HiddenChannelHandles({
+  channels,
+  visibleChannels,
+  connectedChannelIds,
+  prefix,
+  handleType,
+  position,
+  handleStyle,
+}) {
+  const visibleIds = new Set((visibleChannels || []).map((c) => c.channelId));
+  const ids = connectedChannelIds instanceof Set ? connectedChannelIds : new Set(connectedChannelIds || []);
+  const hidden = (channels || []).filter((c) => !visibleIds.has(c.channelId) && ids.has(c.channelId));
+  if (hidden.length === 0) return null;
+  return hidden.map((channel) => (
+    <Handle
+      key={`${prefix}-hidden-${channel.channelId}`}
+      id={`${prefix}-${channel.channelId}`}
+      type={handleType}
+      position={position}
+      isConnectable={false}
+      style={{ ...handleStyle, opacity: 0, pointerEvents: 'none' }}
+    />
+  ));
+}
+
 export function CompactStackedHandles({
   channels,
   prefix,

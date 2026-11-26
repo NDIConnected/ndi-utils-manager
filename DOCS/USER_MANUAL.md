@@ -98,14 +98,14 @@ Right-click the tray icon:
 | **Discovery Server** | Shows send/recv listener status and configured Discovery Server URL |
 | **Port** | Change the HTTP port (requires service restart) |
 | **Restart service** | Restarts the embedded web server without closing the app |
-| **Open data folder** | Opens `%LocalAppData%\NDIManager` (settings, etc.) |
+| **Open data folder** | Opens `%LocalAppData%\NDIManager` (settings, logs) |
 | **Exit** | Stops the application |
 
 **Double-click** the tray icon to open the Web UI (same as **Open Web UI**).
 
 ### Data folder
 
-**Open data folder** opens `%LocalAppData%\NDIManager`. This stores **`settings.json`** (HTTP port only). Canvas layout, filters, and compact-view preferences are stored in the **browser** (`localStorage`), not in this folder.
+**Open data folder** opens `%LocalAppData%\NDIManager`. This stores **`settings.json`** (HTTP port only) and the **`logs\`** folder: one file per day (`ndimanager-yyyyMMdd.log`, last 7 days kept) with startup, Discovery Server listener state, receiver routing changes, warnings and errors. Canvas layout, filters, and compact-view preferences are stored in the **browser** (`localStorage`), not in this folder.
 
 ---
 
@@ -480,6 +480,8 @@ Restart the application after changing bridge host settings.
 ---
 
 ## 14. Troubleshooting
+
+> **First stop:** tray → **Open data folder** → `logs\` — the log of the day shows listener connect/reconnect, receiver `source-name` / `connection-state` changes and any errors.
 
 ### Web UI is blank or shows old version
 

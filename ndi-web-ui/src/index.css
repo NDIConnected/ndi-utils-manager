@@ -39,3 +39,14 @@ body {
 .react-flow__edge-textwrapper {
   pointer-events: all;
 }
+
+/* Node animations (previously injected by each node component on every render). */
+@keyframes tallyPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}

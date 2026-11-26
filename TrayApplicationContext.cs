@@ -16,6 +16,7 @@ public class TrayApplicationContext : ApplicationContext
     private WebApplication? _webApp;
     private CancellationTokenSource? _cts;
     private Task? _runTask;
+    private readonly FileLoggerProvider _fileLogger = new(FileLoggerProvider.DefaultDirectory);
     private int _currentPort;
     private bool _serverRunning;
 
@@ -141,11 +142,11 @@ public class TrayApplicationContext : ApplicationContext
 
             builder.WebHost.UseUrls($"http://localhost:{_currentPort}", $"http://*:{_currentPort}");
 
-            // In WinExe mode, console logging goes nowhere - keep default providers
-            // for Debug output window; add file logging if needed later
+            // In WinExe mode console logging goes nowhere: persist to %LocalAppData%\NDIManager\logs
+            // (shared provider instance, survives web host restarts; per-tick traces are Debug).
             builder.Logging.SetMinimumLevel(LogLevel.Warning);
-            // Temporary: Send/Recv listener diagnostic logs (§18 monitoring)
             builder.Logging.AddFilter("NDIManager", LogLevel.Information);
+            builder.Logging.AddProvider(_fileLogger);
 
             _webApp = builder.Build();
 
@@ -513,6 +514,7 @@ public class TrayApplicationContext : ApplicationContext
             _iconYellow?.Dispose();
             _iconRed?.Dispose();
             _cts?.Dispose();
+            _fileLogger.Dispose();
         }
         base.Dispose(disposing);
     }
