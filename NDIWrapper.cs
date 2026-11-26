@@ -45,7 +45,9 @@ public static class NDI
         metadata_only = -10,
         audio_only = 10,
         lowest = 0,
-        highest = 100
+        highest = 100,
+        video_only_lowest = 1,   // NDI 6.4+
+        video_only_highest = 101 // NDI 6.4+
     }
 
     public enum frame_type
@@ -258,6 +260,10 @@ public static class NDI
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern void NDIlib_destroy();
 
+    /// <summary>Returns a static UTF-8 version string owned by the SDK (do not free).</summary>
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr NDIlib_version();
+
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_send_create(ref send_create_t p_create_settings);
 
@@ -332,7 +338,7 @@ public static class NDI
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.U1)]
-    public static extern bool NDIlib_send_advertiser_add_sender(IntPtr p_instance, IntPtr p_sender, bool allow_monitoring);
+    public static extern bool NDIlib_send_advertiser_add_sender(IntPtr p_instance, IntPtr p_sender, [MarshalAs(UnmanagedType.U1)] bool allow_monitoring);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.U1)]
@@ -349,7 +355,7 @@ public static class NDI
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool NDIlib_send_listener_is_connected(IntPtr p_instance);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_send_listener_get_server_url(IntPtr p_instance);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -359,11 +365,11 @@ public static class NDI
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool NDIlib_send_listener_wait_for_senders(IntPtr p_instance, uint timeout_in_ms);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern void NDIlib_send_listener_subscribe_events(IntPtr p_instance, string p_sender_uuid);
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_send_listener_subscribe_events(IntPtr p_instance, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_sender_uuid);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern void NDIlib_send_listener_unsubscribe_events(IntPtr p_instance, string p_sender_uuid);
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_send_listener_unsubscribe_events(IntPtr p_instance, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_sender_uuid);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_send_listener_get_events(IntPtr p_instance, ref uint p_num_events, uint timeout_in_ms);
@@ -382,7 +388,7 @@ public static class NDI
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool NDIlib_recv_listener_is_connected(IntPtr p_instance);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_recv_listener_get_server_url(IntPtr p_instance);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
@@ -392,15 +398,15 @@ public static class NDI
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool NDIlib_recv_listener_wait_for_receivers(IntPtr p_instance, uint timeout_in_ms);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.U1)]
-    public static extern bool NDIlib_recv_listener_send_connect(IntPtr p_instance, string p_receiver_uuid, string p_source_name);
+    public static extern bool NDIlib_recv_listener_send_connect(IntPtr p_instance, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_receiver_uuid, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_source_name);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern void NDIlib_recv_listener_subscribe_events(IntPtr p_instance, string p_receiver_uuid);
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_listener_subscribe_events(IntPtr p_instance, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_receiver_uuid);
 
-    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public static extern void NDIlib_recv_listener_unsubscribe_events(IntPtr p_instance, string p_receiver_uuid);
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void NDIlib_recv_listener_unsubscribe_events(IntPtr p_instance, [MarshalAs(UnmanagedType.LPUTF8Str)] string p_receiver_uuid);
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr NDIlib_recv_listener_get_events(IntPtr p_instance, ref uint p_num_events, uint timeout_in_ms);

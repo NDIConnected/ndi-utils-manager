@@ -31,6 +31,9 @@ public class NDIRecvListener : IDisposable
         _logger = logger;
     }
 
+    /// <summary>True when the native listener instance exists (create can fail while no Discovery Server is reachable).</summary>
+    public bool IsCreated => _listenerInstance != IntPtr.Zero;
+
     public bool IsConnected
     {
         get

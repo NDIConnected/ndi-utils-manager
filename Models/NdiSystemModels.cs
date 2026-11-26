@@ -3,6 +3,8 @@ namespace NDIManager.Models;
 public class NdiSystemStatus
 {
     public string AppVersion { get; set; } = string.Empty;
+    /// <summary>Runtime NDI library version reported by <c>NDIlib_version()</c>.</summary>
+    public string NdiSdkVersion { get; set; } = string.Empty;
     public DateTime ServerTime { get; set; } = DateTime.UtcNow;
     public string DiscoveryServerUrl { get; set; } = string.Empty;
     public bool SendListenerConnected { get; set; }

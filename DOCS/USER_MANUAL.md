@@ -52,7 +52,7 @@ Connections are sent as NDI Discovery Server commands (`CONNECT` / `DISCONNECT`)
 |-----------|-------------|
 | Operating system | Windows 10/11 x64 |
 | .NET runtime | **Not required** — bundled in the installer (self-contained) |
-| NDI | NDI SDK 6 runtime (`Processing.NDI.Lib.x64.dll`) |
+| NDI | NDI SDK 6 runtime (`Processing.NDI.Lib.x64.dll`), tested with 6.4.0 |
 | Network | NDI Discovery Server reachable from this PC (for remote monitoring and connect commands) |
 | Browser | Modern browser (Chrome, Edge, Firefox) for the Web UI |
 | Permissions | Administrator rights to install; standard user can run after install |

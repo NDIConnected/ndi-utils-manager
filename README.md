@@ -13,7 +13,7 @@ Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core**
 ## Requirements
 
 - Windows 10/11 x64  
-- **NDI SDK 6** runtime (`Processing.NDI.Lib.x64.dll`) — installed with NDI Tools/SDK  
+- **NDI SDK 6** runtime (`Processing.NDI.Lib.x64.dll`) — installed with NDI Tools/SDK; built and tested against **NDI SDK 6.4.0**  
 - Node.js — only if you **rebuild** the Web UI from source  
 
 The published installer bundles the .NET runtime. End users do **not** need to install .NET separately.
