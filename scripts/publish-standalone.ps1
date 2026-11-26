@@ -5,12 +5,20 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Write-Host "Building Web UI ..."
 Push-Location "$repoRoot\ndi-web-ui"
 npm run build
+$npmExit = $LASTEXITCODE
 Pop-Location
+if ($npmExit -ne 0) { exit $npmExit }
 
 Write-Host "Syncing wwwroot ..."
 Remove-Item "$repoRoot\wwwroot\*" -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "$repoRoot\wwwroot" | Out-Null
 Copy-Item "$repoRoot\ndi-web-ui\dist\*" "$repoRoot\wwwroot" -Recurse -Force
+
+# Hashed bundles from earlier builds would otherwise stay in publish\wwwroot and ship in the installer.
+Write-Host "Cleaning publish\wwwroot ..."
+if (Test-Path "$repoRoot\publish\wwwroot") {
+  Remove-Item "$repoRoot\publish\wwwroot" -Recurse -Force
+}
 
 Write-Host "Publishing self-contained win-x64 to publish\ ..."
 dotnet publish "$repoRoot\NDIManager.csproj" -c Release -r win-x64 --self-contained true -o "$repoRoot\publish"
