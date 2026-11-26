@@ -12,6 +12,7 @@ import {
   compactToggleTitleProps,
   detailedToggleTitleProps,
   nodeDragHandleProps,
+  resolveMachineName,
 } from './compactNodeHelpers';
 
 const tallyChip = {
@@ -286,6 +287,8 @@ function SenderNode({ data }) {
       : data.applicationId === 'unknown'
         ? inferredAppName
         : '';
+    // Only "HOST (App)" names carry a machine prefix; a bare name is the endpoint itself.
+    const machineName = resolveMachineName(data, inferredAppName ? inferredDeviceName : '', appDisplayName);
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
     const totalDroppedFrames = sumDroppedFrames(channels);
@@ -314,6 +317,12 @@ function SenderNode({ data }) {
           {appSubDisplayName ? (
             <div style={{ color: '#cbd5e1', fontSize: '11px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {appSubDisplayName}
+            </div>
+          ) : null}
+          {machineName ? (
+            <div style={compactAddressRowStyle()} title="Machine / device publishing these NDI endpoints">
+              <span style={styles.label}>Host:</span>
+              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
             </div>
           ) : null}
           <div style={compactAddressRowStyle()}>
@@ -437,6 +446,12 @@ function SenderNode({ data }) {
         )}
 
         <div style={styles.infoGrid}>
+          {machineName ? (
+            <div style={styles.infoRow} title="Machine / device publishing these NDI endpoints">
+              <span style={styles.label}>Host:</span>
+              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
+            </div>
+          ) : null}
           <div style={styles.infoRow}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '-'}</span>
