@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as signalR from '@microsoft/signalr';
-
-const MAX_RETRY_DELAY_MS = 10000;
-
-// Never give up: 0, 1, 2, 4, 8, 10, 10, ... seconds.
-const retryDelay = (attempt) => (attempt === 0 ? 0 : Math.min(1000 * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS));
+import { retryDelay } from '../utils/snapshotOrder';
 
 /**
  * Live snapshot push from the backend hub.

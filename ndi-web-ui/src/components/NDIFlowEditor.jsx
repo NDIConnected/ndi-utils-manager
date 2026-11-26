@@ -6,10 +6,8 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  MarkerType,
   ReactFlowProvider,
 } from '@xyflow/react';
-import axios from 'axios';
 import SenderNode from './SenderNode';
 import ReceiverNode from './ReceiverNode';
 import CustomEdge from './CustomEdge';
@@ -18,1375 +16,283 @@ import MetricsLegend from './MetricsLegend';
 import ChannelDetailDrawer from './ChannelDetailDrawer';
 import NdiTableView from './NdiTableView';
 import AutoMeasureLayout from './AutoMeasureLayout';
-import { useToast } from '../context/ToastContext';
-import { useNdiSignalR } from '../hooks/useNdiSignalR';
+import { styles } from './NDIFlowEditor.styles';
+import { useToast } from '../context/useToast';
+import { useNdiSnapshot } from '../hooks/useNdiSnapshot';
+import { useRouting } from '../hooks/useRouting';
+import { useCanvasLayout } from '../hooks/useCanvasLayout';
+import { buildHostGroups } from '../utils/deviceGrouping';
+import { computeDefaultLayout, getBundleLabel } from '../utils/layoutUtils';
+import { filterSnapshotDevices } from '../utils/flowFilters';
+import { resolveConnectionDetails } from '../utils/routing';
 import {
-  buildHostGroups,
-  filterDevicesByHost,
-  deviceHasActivity,
-  LARGE_NETWORK_DEVICE_THRESHOLD,
-  COLLAPSE_CHANNELS_THRESHOLD,
-  MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
-} from '../utils/deviceGrouping';
-import {
-  computeDefaultLayout,
-  computeHostAlignedLayout,
-  collectLayoutHostKeys,
-  enrichNodesWithDomMeasurements,
-  saveHostPreset,
-  loadHostPreset,
-  getBundleLabel,
-  mergeLayoutWithNewDevices,
-  isValidSavedPosition,
-} from '../utils/layoutUtils';
+  buildFlowGraph,
+  buildCanvasStructureKey,
+  confirmedOptimisticReceivers,
+  mergeNodes,
+  mergeEdges,
+  refreshNodes,
+} from '../utils/flowGraph';
 
-const API_BASE = '/api/ndi';
-const HIDE_INTERNAL_CONNECTIONS = false;
-const NODE_LAYOUT_VERSION = '11';
-
-const styles = {
-  container: { width: '100vw', height: '100vh', backgroundColor: '#111827', display: 'flex', flexDirection: 'column' },
-  header: {
-    flexShrink: 0,
-    backgroundColor: '#1f2937',
-    borderBottom: '1px solid #374151',
-    padding: '12px 20px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  headerLeft: { display: 'flex', flexDirection: 'column', minWidth: 180 },
-  title: { fontSize: '22px', fontWeight: 'bold', color: 'white', margin: 0 },
-  subtitle: { fontSize: '13px', color: '#9ca3af', margin: 0 },
-  headerRight: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
-  filtersRow: { display: 'flex', alignItems: 'center', gap: '8px' },
-  filterInput: {
-    width: '220px',
-    padding: '6px 10px',
-    borderRadius: '6px',
-    border: '1px solid #4b5563',
-    backgroundColor: '#111827',
-    color: '#e5e7eb',
-    fontSize: '12px',
-    outline: 'none',
-  },
-  stats: { fontSize: '13px', color: '#d1d5db' },
-  statHighlight: { fontWeight: '600' },
-  senderCount: { color: '#10b981' },
-  receiverCount: { color: '#3b82f6' },
-  body: { display: 'flex', flex: 1, minHeight: 0 },
-  flowPane: { flex: 1, minWidth: 0, height: '100%', position: 'relative' },
-  toolbar: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' },
-  viewBtn: (active) => ({
-    padding: '5px 10px',
-    fontSize: '12px',
-    borderRadius: '6px',
-    border: '1px solid #4b5563',
-    backgroundColor: active ? '#2563eb' : '#111827',
-    color: '#e5e7eb',
-    cursor: 'pointer',
-  }),
-  checkLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '5px',
-    fontSize: '12px',
-    color: '#d1d5db',
-    cursor: 'pointer',
-    userSelect: 'none',
-  },
-  linkPill: (state) => ({
-    padding: '4px 10px',
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-    border: '1px solid #374151',
-    backgroundColor: '#111827',
-    color: state === 'live' ? '#4ade80' : state === 'offline' ? '#f87171' : '#facc15',
-  }),
-  offlineBanner: {
-    flexShrink: 0,
-    padding: '6px 16px',
-    backgroundColor: '#7f1d1d',
-    color: '#fee2e2',
-    fontSize: 12,
-    borderBottom: '1px solid #991b1b',
-  },
-  statusPill: (health) => ({
-    padding: '4px 10px',
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: 600,
-    backgroundColor:
-      health === 'ok' ? '#14532d' : health === 'idle' ? '#78350f' : health === 'degraded' ? '#713f12' : '#7f1d1d',
-    color: '#f9fafb',
-    border: '1px solid #374151',
-    whiteSpace: 'nowrap',
-  }),
-  refreshButton: {
-    padding: '6px 12px',
-    backgroundColor: '#2563eb',
-    color: 'white',
-    borderRadius: '8px',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '12px',
-  },
-  footer: {
-    flexShrink: 0,
-    padding: '6px 16px',
-    borderTop: '1px solid #374151',
-    backgroundColor: '#0f172a',
-    color: '#6b7280',
-    fontSize: 11,
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  connectPreview: {
-    position: 'fixed',
-    pointerEvents: 'none',
-    zIndex: 50,
-    padding: '6px 10px',
-    borderRadius: 6,
-    backgroundColor: 'rgba(17,24,39,0.95)',
-    border: '1px solid #4ade80',
-    color: '#ecfdf5',
-    fontSize: 12,
-    maxWidth: 360,
-  },
+const LINK_LABELS = {
+  live: 'Live',
+  reconnecting: 'Reconnecting…',
+  polling: 'Polling',
+  offline: 'Offline',
+};
+const LINK_TITLES = {
+  live: 'Real-time updates (SignalR) connected',
+  reconnecting: 'Real-time channel reconnecting; polling every 2 s meanwhile',
+  polling: 'Real-time channel unavailable; polling every 2 s',
+  offline: 'Backend unreachable; showing last known state',
 };
 
-function mergeNodes(prevNodes, nextNodes, draggingNodeIds, snapshotIsEmpty) {
-  if (snapshotIsEmpty && nextNodes.length === 0 && prevNodes.length > 0) {
-    return prevNodes;
+function loadCompactDeviceKeys() {
+  try {
+    const raw = localStorage.getItem('ndi-compact-device-keys');
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
   }
-  const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
-  return nextNodes.map((node) => {
-    const prev = prevMap.get(node.id);
-    if (!prev) return { ...node, selected: false };
-    const keepDragPosition = prev.position && draggingNodeIds.has(node.id);
-    const position = keepDragPosition ? prev.position : node.position;
-    // Unchanged node: reuse the previous object so React Flow keeps its measurements and skips re-render.
-    if (prev.data === node.data && samePosition(prev.position, position)) return prev;
-    // Start from the previous node to keep `measured`/handle bounds (avoids hide + re-measure flicker).
-    return { ...prev, ...node, position, selected: prev.selected ?? false };
-  });
 }
 
-function samePosition(a, b) {
-  return !!a && !!b && a.x === b.x && a.y === b.y;
-}
-
-function mergeEdges(prevEdges, nextEdges, snapshotIsEmpty) {
-  if (snapshotIsEmpty && nextEdges.length === 0 && prevEdges.length > 0) {
-    return prevEdges;
-  }
-  const prevMap = new Map(prevEdges.map((e) => [e.id, e]));
-  return nextEdges.map((edge) => {
-    const prev = prevMap.get(edge.id);
-    // Edge data is cached per content, so identical data means an identical edge.
-    if (prev && prev.data === edge.data) return prev;
-    return { ...edge, selected: prev?.selected ?? false };
-  });
-}
-
-function buildCanvasStructureKey({
-  filteredSenders,
-  filteredReceivers,
-  visibleConnections,
-  selectedHostKeys,
-  senderFilter,
-  receiverFilter,
-  showActiveOnly,
-  expandedDeviceKeys,
-  compactDeviceKeys,
-}) {
-  const senderPart = filteredSenders
-    .map((d) => `${d.deviceKey}:${d.isBridgeHub ? 'hub' : 'dev'}:${(d.channels || []).map((c) => c.channelId).join(',')}`)
-    .join('|');
-  const receiverPart = filteredReceivers
-    .map((d) => `${d.deviceKey}:${(d.channels || []).map((c) => c.channelId).join(',')}`)
-    .join('|');
-  const connPart = visibleConnections
-    .map((c) => `${c.connectionId}:${c.senderChannelId}:${c.receiverChannelId}`)
-    .join('|');
-  const hostPart = [...selectedHostKeys].sort().join(',');
-  const expandPart = [...expandedDeviceKeys].sort().join(',');
-  const compactPart = [...compactDeviceKeys].sort().join(',');
-  return `${senderPart}::${receiverPart}::${connPart}::${hostPart}::${senderFilter}::${receiverFilter}::${showActiveOnly}::${expandPart}::${compactPart}`;
-}
-
-function buildDeviceSearchText(device) {
-  const channels = Array.isArray(device?.channels) ? device.channels : [];
-  const channelTokens = channels.flatMap((c) => [
-    c?.streamLabel || '',
-    c?.endpointName || '',
-    c?.videoCodec || '',
-    c?.audioCodec || '',
-    c?.address || '',
-  ]);
-
-  return [
-    device?.applicationId || '',
-    device?.displayName || '',
-    device?.address || '',
-    device?.videoSummary || '',
-    device?.audioSummary || '',
-    device?.resolutionSummary || '',
-    device?.frameRateSummary || '',
-    device?.portSummary || '',
-    ...channelTokens,
-  ].join(' ').toLowerCase();
-}
-
-function matchesFilterQuery(searchText, rawQuery) {
-  const query = (rawQuery || '').trim().toLowerCase();
-  if (!query) return true;
-
-  const matchesTerm = (term) => {
-    const t = (term || '').trim();
-    if (!t) return true;
-    if (t.includes('*') || t.includes('?')) {
-      const escaped = t
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
-      return new RegExp(escaped, 'i').test(searchText);
-    }
-    return searchText.includes(t);
-  };
-
-  const andGroups = query.split(',').map((g) => g.trim()).filter(Boolean);
-  if (andGroups.length === 0) return true;
-
-  return andGroups.every((group) => {
-    const orTerms = group.split('|').map((t) => t.trim()).filter(Boolean);
-    if (orTerms.length === 0) return true;
-    return orTerms.some((term) => matchesTerm(term));
-  });
-}
-
-function sourcesMatch(a, b) {
-  const left = (a || '').trim();
-  const right = (b || '').trim();
-  if (!left || !right) return false;
-  return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
-}
-
-const OPTIMISTIC_CONNECTION_TTL_MS = 8000;
-const FETCH_TIMEOUT_MS = 5000;
-const FALLBACK_POLL_MS = 2000;
-const LIVE_SAFETY_POLL_MS = 15000;
-
-function isConnectionConfirmed(conn, snapshot) {
-  if (conn?.optimistic) return false;
-  const receiverDevice = snapshot.receivers.find((d) => d.deviceKey === conn.receiverDeviceKey);
-  const channel = receiverDevice?.channels?.find((c) => c.channelId === conn.receiverChannelId);
-  if (!channel) return false;
-  return sourcesMatch(channel.currentSource, conn.sourceName);
-}
-
-function buildOptimisticConnection(details) {
-  const {
-    sourceDevice,
-    targetDevice,
-    sourceChannel,
-    targetChannel,
-    sourceName,
-    receiverUuid,
-  } = details;
-  if (!sourceDevice || !targetDevice || !sourceChannel || !targetChannel || !receiverUuid) return null;
-
-  return {
-    connectionId: `${sourceChannel.endpointUuid}->${targetChannel.endpointUuid}`,
-    senderDeviceKey: sourceDevice.deviceKey,
-    senderChannelId: sourceChannel.channelId,
-    senderLabel: sourceChannel.streamLabel,
-    senderUuid: sourceChannel.endpointUuid,
-    receiverDeviceKey: targetDevice.deviceKey,
-    receiverChannelId: targetChannel.channelId,
-    receiverLabel: targetChannel.streamLabel,
-    receiverUuid,
-    sourceName,
-    optimistic: true,
-    createdAt: Date.now(),
-  };
+function toggleInSet(set, key) {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
 }
 
 function FlowCanvas(props) {
   return <ReactFlow {...props} />;
 }
 
+/**
+ * Main screen: header/toolbar, host sidebar, React Flow canvas and table view.
+ * Data, routing commands and layout live in hooks (useNdiSnapshot, useRouting, useCanvasLayout);
+ * the graph itself is built by the pure buildFlowGraph().
+ */
 export default function NDIFlowEditor() {
   const { push: toast } = useToast();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isFirstLoad, setIsFirstLoad] = useState(true);
-  const [snapshot, setSnapshot] = useState({ senders: [], receivers: [], connections: [] });
-  const [systemStatus, setSystemStatus] = useState(null);
+
+  // ---- view state
   const [senderFilter, setSenderFilter] = useState('');
   const [receiverFilter, setReceiverFilter] = useState('');
+  const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [mainTab, setMainTab] = useState('canvas');
   const [viewMode, setViewMode] = useState('overview');
   const [selectedHostKeys, setSelectedHostKeys] = useState(() => new Set());
-  const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showLegend, setShowLegend] = useState(() => localStorage.getItem('ndi-metrics-legend-seen') !== '1');
-  const [compactDeviceKeys, setCompactDeviceKeys] = useState(() => {
-    try {
-      const raw = localStorage.getItem('ndi-compact-device-keys');
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
+  const [compactDeviceKeys, setCompactDeviceKeys] = useState(loadCompactDeviceKeys);
   const [expandedDeviceKeys, setExpandedDeviceKeys] = useState(() => new Set());
   const [channelDetail, setChannelDetail] = useState(null);
   const [connectPreview, setConnectPreview] = useState(null);
-  const [pendingEpoch, setPendingEpoch] = useState(0);
-  const viewModeInitialized = useRef(false);
-  const edgeReconnectSuccessful = useRef(true);
-  const mutationBlockUntilRef = useRef(0);
-  const suppressedReceiverUntilRef = useRef(new Map());
-  const pendingReceiverUntilRef = useRef(new Map());
-  const optimisticConnectionsRef = useRef(new Map());
   const rfInstanceRef = useRef(null);
-  const draggingNodeIdsRef = useRef(new Set());
-  const layoutSeededRef = useRef(false);
-  const userLayoutRef = useRef(false);
-  const nodePositionsRef = useRef({});
   const canvasStructureKeyRef = useRef('');
-  // Content-keyed caches: unchanged devices/edges keep the same object across snapshots,
-  // so memoized node components and React Flow skip work.
+  // Content-keyed caches used by buildFlowGraph (unchanged devices/edges keep the same objects).
   const nodeDataCacheRef = useRef(new Map());
   const edgeCacheRef = useRef(new Map());
   const visibleConnectionsRef = useRef([]);
-  const snapshotDebounceRef = useRef(null);
-  // Ordering: drop any payload older than the newest one accepted (REST polls and pushes race).
-  const lastSnapshotIdRef = useRef({ instanceId: '', sequence: -1 });
-  const hasLoadedRef = useRef(false);
-  const devicesInFlightRef = useRef(false);
-  const [backendOfflineSince, setBackendOfflineSince] = useState(null);
-  const [autoMeasureLayout, setAutoMeasureLayout] = useState(() => {
-    try {
-      if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return true;
-      const saved = JSON.parse(localStorage.getItem('ndi-multichannel-node-positions') || '{}');
-      return !Object.values(saved).some(isValidSavedPosition);
-    } catch {
-      return true;
-    }
-  });
-  const [expandedLayoutEpoch, setExpandedLayoutEpoch] = useState(0);
 
-  const [nodePositions, setNodePositions] = useState(() => {
-    try {
-      const savedVersion = localStorage.getItem('ndi-multichannel-layout-version');
-      if (savedVersion !== NODE_LAYOUT_VERSION) {
-        localStorage.setItem('ndi-multichannel-layout-version', NODE_LAYOUT_VERSION);
-        localStorage.removeItem('ndi-multichannel-node-positions');
-        return {};
-      }
-      const saved = localStorage.getItem('ndi-multichannel-node-positions');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const singleHostKey = selectedHostKeys.size === 1 ? [...selectedHostKeys][0] : null;
 
-  useEffect(() => {
-    nodePositionsRef.current = nodePositions;
-  }, [nodePositions]);
+  // ---- data, routing, layout
+  const {
+    snapshot,
+    systemStatus,
+    loading,
+    error,
+    backendOfflineSince,
+    linkState,
+    fetchDevices,
+    fetchStatus,
+    blockPollingDuringMutation,
+  } = useNdiSnapshot();
 
-  const nodeTypes = useMemo(() => ({ senderNode: SenderNode, receiverNode: ReceiverNode }), []);
-  const edgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
+  const routing = useRouting({ snapshot, fetchDevices, blockPollingDuringMutation, toast, singleHostKey });
+  const { optimisticRef, forgetOptimistic, isReceiverConnectionSuppressed } = routing;
 
-  const isReceiverPending = useCallback((uuid) => {
-    if (!uuid) return false;
-    const until = pendingReceiverUntilRef.current.get(uuid);
-    if (!until) return false;
-    if (Date.now() >= until) {
-      pendingReceiverUntilRef.current.delete(uuid);
-      return false;
-    }
-    return true;
+  const presetFilters = useMemo(
+    () => ({ senderFilter, receiverFilter, showActiveOnly }),
+    [senderFilter, receiverFilter, showActiveOnly],
+  );
+  const applyPresetFilters = useCallback((preset) => {
+    if (preset.senderFilter != null) setSenderFilter(preset.senderFilter);
+    if (preset.receiverFilter != null) setReceiverFilter(preset.receiverFilter);
+    if (preset.showActiveOnly != null) setShowActiveOnly(preset.showActiveOnly);
   }, []);
 
+  const layout = useCanvasLayout({
+    snapshot,
+    loading,
+    selectedHostKeys,
+    singleHostKey,
+    expandedDeviceKeys,
+    compactDeviceKeys,
+    filters: presetFilters,
+    applyFilters: applyPresetFilters,
+    setNodes,
+    onNodesChange,
+    rfInstanceRef,
+    toast,
+  });
+  const { resolvePosition, draggingNodeIdsRef, requestAutoLayout } = layout;
+
+  // ---- derived view data
+  const nodeTypes = useMemo(() => ({ senderNode: SenderNode, receiverNode: ReceiverNode }), []);
+  const edgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
   const hostGroups = useMemo(() => buildHostGroups(snapshot), [snapshot]);
-  const singleHostKey = selectedHostKeys.size === 1 ? [...selectedHostKeys][0] : null;
+  const bundleLabel = useMemo(() => getBundleLabel(), []);
   const hostFilterLabel = useMemo(() => {
     if (selectedHostKeys.size === 0) return null;
     return [...selectedHostKeys].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).join(', ');
   }, [selectedHostKeys]);
 
+  // ---- view actions
   const handleHostClick = useCallback((hostKey, event) => {
     const multiSelect = event?.ctrlKey || event?.metaKey;
-    setSelectedHostKeys((prev) => {
-      if (multiSelect) {
-        const next = new Set(prev);
-        if (next.has(hostKey)) next.delete(hostKey);
-        else next.add(hostKey);
-        return next;
-      }
-      return new Set([hostKey]);
-    });
+    setSelectedHostKeys((prev) => (multiSelect ? toggleInSet(prev, hostKey) : new Set([hostKey])));
   }, []);
 
-  const clearHostSelection = useCallback(() => {
-    setSelectedHostKeys(new Set());
-  }, []);
-  const bundleLabel = useMemo(() => getBundleLabel(), []);
-
-  const markPendingReceiver = useCallback((receiverUuid, ms = 4000) => {
-    if (!receiverUuid) return;
-    pendingReceiverUntilRef.current.set(receiverUuid, Date.now() + ms);
-    setPendingEpoch((e) => e + 1);
-  }, []);
-
-  const rememberOptimisticConnection = useCallback((details) => {
-    const conn = buildOptimisticConnection(details);
-    if (!conn) return;
-    optimisticConnectionsRef.current.set(conn.receiverUuid, conn);
-    setPendingEpoch((e) => e + 1);
-    // Expire if the receiver never reports the new source (offline device, unresolved name, ...).
-    setTimeout(() => {
-      const current = optimisticConnectionsRef.current.get(conn.receiverUuid);
-      if (current !== conn) return; // confirmed, cleared or superseded meanwhile
-      optimisticConnectionsRef.current.delete(conn.receiverUuid);
-      setPendingEpoch((e) => e + 1);
-      toast(`Connection not confirmed by receiver: ${conn.receiverLabel || conn.receiverUuid} → ${conn.sourceName}`, 'warning');
-    }, OPTIMISTIC_CONNECTION_TTL_MS);
-  }, [toast]);
-
-  const clearOptimisticConnection = useCallback((receiverUuid) => {
-    if (!receiverUuid) return;
-    if (optimisticConnectionsRef.current.delete(receiverUuid)) {
-      setPendingEpoch((e) => e + 1);
-    }
-  }, []);
-
-  const applySnapshotPayload = useCallback((data) => {
-    if (!data) return;
-    const instanceId = data.instanceId || '';
-    const sequence = Number(data.sequence);
-    if (instanceId && Number.isFinite(sequence)) {
-      const last = lastSnapshotIdRef.current;
-      // Same backend instance and not newer: stale response, ignore. A new instance (restart) resets ordering.
-      if (last.instanceId === instanceId && sequence <= last.sequence) return;
-      lastSnapshotIdRef.current = { instanceId, sequence };
-    }
-    hasLoadedRef.current = true;
-    setBackendOfflineSince(null);
-    if (snapshotDebounceRef.current) {
-      clearTimeout(snapshotDebounceRef.current);
-    }
-    snapshotDebounceRef.current = setTimeout(() => {
-      snapshotDebounceRef.current = null;
-      setSnapshot({
-        senders: Array.isArray(data.senders) ? data.senders : [],
-        receivers: Array.isArray(data.receivers) ? data.receivers : [],
-        connections: Array.isArray(data.connections) ? data.connections : [],
-      });
-      setError(null);
-    }, 80);
-  }, []);
-
-  useEffect(() => () => {
-    if (snapshotDebounceRef.current) clearTimeout(snapshotDebounceRef.current);
-  }, []);
-
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/status`, { timeout: FETCH_TIMEOUT_MS });
-      setSystemStatus(res.data || null);
-    } catch {
-      // Status is optional; polling continues.
-    }
-  }, []);
-
-  const fetchDevices = useCallback(async (force = false) => {
-    if (!force && Date.now() < mutationBlockUntilRef.current) return;
-    // Background polls never pile up behind a slow backend; forced fetches (after actions) always go.
-    if (!force && devicesInFlightRef.current) return;
-
-    devicesInFlightRef.current = true;
-    try {
-      const res = await axios.get(`${API_BASE}/devices`, { timeout: FETCH_TIMEOUT_MS });
-      applySnapshotPayload(res.data);
-    } catch (err) {
-      console.error('Error fetching aggregated devices:', err);
-      if (hasLoadedRef.current) {
-        // Keep the canvas and last known state; show a banner instead of unmounting everything.
-        setBackendOfflineSince((prev) => prev ?? new Date());
-      } else {
-        setError('Failed to fetch NDI devices. Make sure the backend is running.');
-      }
-    } finally {
-      devicesInFlightRef.current = false;
-      setLoading(false);
-    }
-  }, [applySnapshotPayload]);
-
-  const signalRState = useNdiSignalR({
-    enabled: true,
-    onSnapshot: useCallback((payload) => {
-      if (payload?.snapshot) applySnapshotPayload(payload.snapshot);
-      if (payload?.status) setSystemStatus(payload.status);
-    }, [applySnapshotPayload]),
-    // After (re)connecting, resync immediately instead of waiting for the next push.
-    onReconnected: useCallback(() => {
-      fetchDevices(true);
-      fetchStatus();
-    }, [fetchDevices, fetchStatus]),
-  });
-  const pushLive = signalRState === 'live';
+  const clearHostSelection = useCallback(() => setSelectedHostKeys(new Set()), []);
 
   const toggleCompactDevice = useCallback((nodeId) => {
     setCompactDeviceKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
+      const next = toggleInSet(prev, nodeId);
       localStorage.setItem('ndi-compact-device-keys', JSON.stringify([...next]));
       return next;
     });
-    if (!userLayoutRef.current) {
-      setAutoMeasureLayout(true);
-      setExpandedLayoutEpoch((epoch) => epoch + 1);
-    }
-  }, []);
+    requestAutoLayout();
+  }, [requestAutoLayout]);
 
   const toggleDeviceExpanded = useCallback((nodeId) => {
-    setExpandedDeviceKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
-      return next;
-    });
-    if (!userLayoutRef.current) {
-      setAutoMeasureLayout(true);
-      setExpandedLayoutEpoch((epoch) => epoch + 1);
-    }
-  }, []);
+    setExpandedDeviceKeys((prev) => toggleInSet(prev, nodeId));
+    requestAutoLayout();
+  }, [requestAutoLayout]);
 
-  useEffect(() => {
-    if (viewModeInitialized.current || loading) return;
-    const deviceCount = snapshot.senders.length + snapshot.receivers.length;
-    if (deviceCount > LARGE_NETWORK_DEVICE_THRESHOLD) setViewMode('overview');
-    viewModeInitialized.current = true;
-  }, [loading, snapshot.senders.length, snapshot.receivers.length]);
-
-  const blockPollingDuringMutation = useCallback((ms = 3500) => {
-    mutationBlockUntilRef.current = Math.max(mutationBlockUntilRef.current, Date.now() + ms);
-  }, []);
-
-  const suppressReceiverConnection = useCallback((receiverUuid, ms = 3500) => {
-    if (!receiverUuid) return;
-    suppressedReceiverUntilRef.current.set(receiverUuid, Date.now() + ms);
-  }, []);
-
-  const isReceiverConnectionSuppressed = useCallback((receiverUuid) => {
-    if (!receiverUuid) return false;
-    const until = suppressedReceiverUntilRef.current.get(receiverUuid);
-    if (!until) return false;
-    if (Date.now() >= until) {
-      suppressedReceiverUntilRef.current.delete(receiverUuid);
-      return false;
-    }
-    return true;
-  }, []);
-
-  const resolveConnectionDetails = useCallback((params, currentSnapshot) => {
-    const sourceDeviceKey = (params?.source ?? '').replace('sender-device-', '');
-    const targetDeviceKey = (params?.target ?? '').replace('receiver-device-', '');
-    const sourceChannelId = (params?.sourceHandle ?? '').replace('out-', '');
-    const targetChannelId = (params?.targetHandle ?? '').replace('in-', '');
-    const sourceDevice = currentSnapshot.senders.find((d) => d.deviceKey === sourceDeviceKey);
-    const sourceChannel = sourceDevice?.channels?.find((c) => c.channelId === sourceChannelId);
-    const targetDevice = currentSnapshot.receivers.find((d) => d.deviceKey === targetDeviceKey);
-    const targetChannel = targetDevice?.channels?.find((c) => c.channelId === targetChannelId);
-    const sourceName = sourceChannel?.endpointName || sourceChannel?.streamLabel || '';
-    const receiverUuid = targetChannel?.endpointUuid || '';
-    return { sourceName, receiverUuid, sourceChannel, targetChannel, sourceDevice, targetDevice };
-  }, []);
-
-  // Moves nodes on the canvas now (not on the next snapshot).
-  const applyPositionsToFlow = useCallback((positions) => {
-    setNodes((prev) => {
-      if (prev.length === 0) return prev;
-      let changed = false;
-      const next = prev.map((node) => {
-        const nextPos = positions[node.id];
-        if (!nextPos || samePosition(node.position, nextPos)) return node;
-        changed = true;
-        return { ...node, position: { x: nextPos.x, y: nextPos.y } };
-      });
-      return changed ? next : prev;
-    });
-  }, [setNodes]);
-
-  /**
-   * Saves positions and applies them to the canvas.
-   * merge=true keeps positions of nodes not in `positions` (host-filtered layouts, presets).
-   */
-  const persistPositions = useCallback((positions, { merge = false } = {}) => {
-    const next = merge ? { ...nodePositionsRef.current, ...positions } : positions;
-    nodePositionsRef.current = next;
-    setNodePositions(next);
-    try {
-      localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(next));
-    } catch {
-      // Storage full or unavailable: layout still applies for this session.
-    }
-    applyPositionsToFlow(positions);
-  }, [applyPositionsToFlow]);
-
-  const resetLayout = useCallback(() => {
-    userLayoutRef.current = false;
-    setAutoMeasureLayout(true);
-    const positions = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
-    persistPositions(positions);
-    toast('Layout reset', 'success');
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.15, maxZoom: 1, duration: 350 }), 100);
-  }, [snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys, persistPositions, toast]);
-
-  const alignLayoutByHost = useCallback(() => {
-    userLayoutRef.current = false;
-    setAutoMeasureLayout(false);
-
-    let senders = snapshot.senders;
-    let receivers = snapshot.receivers;
-    if (selectedHostKeys.size > 0) {
-      senders = filterDevicesByHost(senders, selectedHostKeys);
-      receivers = filterDevicesByHost(receivers, selectedHostKeys);
-    }
-
-    const hostKeys = collectLayoutHostKeys(senders, receivers);
-
-    const fitAlignedView = () => {
-      setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 120);
-    };
-
-    const updateAllNodeInternals = () => {
-      const inst = rfInstanceRef.current;
-      if (!inst?.updateNodeInternals) return;
-      (inst.getNodes?.() ?? []).forEach((node) => {
-        inst.updateNodeInternals(node.id);
-      });
-    };
-
-    // With a host filter only those devices are laid out: keep everyone else's saved position.
-    const partial = selectedHostKeys.size > 0;
-
-    const applyHostLayout = (nodes = null) => {
-      const enrichedNodes = nodes?.length ? enrichNodesWithDomMeasurements(nodes) : null;
-      const positions = computeHostAlignedLayout(
-        senders,
-        receivers,
-        expandedDeviceKeys,
-        compactDeviceKeys,
-        enrichedNodes,
-        hostKeys,
-      );
-      persistPositions(positions, { merge: partial });
-      return positions;
-    };
-
-    const getFlowNodes = () => rfInstanceRef.current?.getNodes?.() ?? [];
-
-    const nodesReadyForMeasure = (nodes) =>
-      nodes.length > 0 && nodes.every((node) => (node.measured?.height ?? 0) >= 80);
-
-    applyHostLayout(null);
-    updateAllNodeInternals();
-
-    let attempts = 0;
-    let finished = false;
-    const finalize = (nodes) => {
-      if (finished) return;
-      finished = true;
-      applyHostLayout(nodes);
-      updateAllNodeInternals();
-      userLayoutRef.current = true;
-      toast('Layout aligned by host', 'success');
-      fitAlignedView();
-    };
-
-    const retryMeasure = () => {
-      if (finished) return;
-      attempts += 1;
-      updateAllNodeInternals();
-      const nodes = enrichNodesWithDomMeasurements(getFlowNodes());
-      if (nodesReadyForMeasure(nodes) || attempts >= 40) {
-        finalize(nodes);
-        return;
-      }
-      requestAnimationFrame(retryMeasure);
-    };
-
-    requestAnimationFrame(() => {
-      retryMeasure();
-      setTimeout(() => {
-        if (!finished) finalize(enrichNodesWithDomMeasurements(getFlowNodes()));
-      }, 320);
-    });
-  }, [
-    snapshot.senders,
-    snapshot.receivers,
-    selectedHostKeys,
-    expandedDeviceKeys,
-    compactDeviceKeys,
-    persistPositions,
-    toast,
-  ]);
-
-  const saveCurrentHostPreset = useCallback(() => {
-    if (!singleHostKey) {
-      toast('Select exactly one host from the Hosts panel', 'warning');
-      return;
-    }
-    saveHostPreset(singleHostKey, {
-      nodePositions,
-      senderFilter,
-      receiverFilter,
-      showActiveOnly,
-    });
-    toast(`Preset saved for ${singleHostKey}`, 'success');
-  }, [singleHostKey, nodePositions, senderFilter, receiverFilter, showActiveOnly, toast]);
-
-  const loadCurrentHostPreset = useCallback(() => {
-    if (!singleHostKey) {
-      toast('Select exactly one host from the Hosts panel', 'warning');
-      return;
-    }
-    const preset = loadHostPreset(singleHostKey);
-    if (!preset) {
-      toast('No preset saved for this host', 'warning');
-      return;
-    }
-    if (preset.nodePositions) {
-      const hostNodeIds = new Set([
-        ...filterDevicesByHost(snapshot.senders, singleHostKey).map((d) => `sender-device-${d.deviceKey}`),
-        ...filterDevicesByHost(snapshot.receivers, singleHostKey).map((d) => `receiver-device-${d.deviceKey}`),
-      ]);
-      const hostPositions = Object.fromEntries(
-        Object.entries(preset.nodePositions).filter(([id]) => hostNodeIds.has(id)),
-      );
-      userLayoutRef.current = true;
-      setAutoMeasureLayout(false);
-      persistPositions(hostPositions, { merge: true });
-    }
-    if (preset.senderFilter != null) setSenderFilter(preset.senderFilter);
-    if (preset.receiverFilter != null) setReceiverFilter(preset.receiverFilter);
-    if (preset.showActiveOnly != null) setShowActiveOnly(preset.showActiveOnly);
-    toast(`Preset loaded for ${singleHostKey}`, 'success');
-  }, [singleHostKey, snapshot.senders, snapshot.receivers, persistPositions, toast]);
-
-  const bulkDisconnectHost = useCallback(async () => {
-    if (!singleHostKey) {
-      toast('Select exactly one host', 'warning');
-      return;
-    }
-    const receivers = filterDevicesByHost(snapshot.receivers, singleHostKey);
-    const uuids = receivers.flatMap((d) => (d.channels || []).map((c) => c.endpointUuid).filter(Boolean));
-    if (uuids.length === 0) {
-      toast('No receivers on this host', 'warning');
-      return;
-    }
-    if (!window.confirm(`Disconnect ${uuids.length} receivers on ${singleHostKey}?`)) return;
-    uuids.forEach((uuid) => clearOptimisticConnection(uuid));
-
-    blockPollingDuringMutation(5000);
-    try {
-      const res = await axios.post(`${API_BASE}/disconnect-bulk`, { receiverUuids: uuids });
-      const ok = res.data?.succeeded ?? 0;
-      toast(`Bulk disconnect: ${ok}/${uuids.length} succeeded`, ok === uuids.length ? 'success' : 'warning');
-    } catch {
-      toast('Bulk disconnect error', 'error');
-    } finally {
-      setTimeout(() => fetchDevices(true), 800);
-    }
-  }, [singleHostKey, snapshot.receivers, blockPollingDuringMutation, clearOptimisticConnection, fetchDevices, toast]);
-
-  const disconnectReceiver = useCallback(async (receiverUuid) => {
-    if (!receiverUuid) return;
-    blockPollingDuringMutation();
-    clearOptimisticConnection(receiverUuid);
-    suppressReceiverConnection(receiverUuid);
-    try {
-      const response = await axios.post(`${API_BASE}/disconnect`, { receiverUuid });
-      if (!response.data?.success) {
-        toast(`Disconnect failed: ${response.data?.message ?? 'error'}`, 'error');
-      } else {
-        toast('Disconnect sent', 'success');
-      }
-    } catch {
-      toast('Disconnect error', 'error');
-    } finally {
-      setTimeout(() => fetchDevices(true), 800);
-    }
-  }, [blockPollingDuringMutation, clearOptimisticConnection, suppressReceiverConnection, fetchDevices, toast]);
-
-  const handleMeasuredLayout = useCallback((positions) => {
-    if (userLayoutRef.current) {
-      setAutoMeasureLayout(false);
-      return;
-    }
-    persistPositions(positions);
-    setAutoMeasureLayout(false);
-    setTimeout(() => rfInstanceRef.current?.fitView({ padding: 0.12, maxZoom: 1, duration: 350 }), 80);
-  }, [persistPositions]);
-
-  const handleNodesChange = useCallback((changes) => {
-    onNodesChange(changes);
-    changes.forEach((change) => {
-      if (change.type === 'position') {
-        if (change.dragging) draggingNodeIdsRef.current.add(change.id);
-        else draggingNodeIdsRef.current.delete(change.id);
-
-        if (change.position && !change.dragging && isValidSavedPosition(change.position)) {
-          userLayoutRef.current = true;
-          setAutoMeasureLayout(false);
-          setNodePositions((prev) => {
-            const updated = { ...prev, [change.id]: change.position };
-            nodePositionsRef.current = updated;
-            localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(updated));
-            return updated;
-          });
-        }
-      }
-    });
-  }, [onNodesChange]);
-
-  useEffect(() => {
-    if (loading) return;
-
-    const nodeIds = [
-      ...snapshot.senders.map((d) => `sender-device-${d.deviceKey}`),
-      ...snapshot.receivers.map((d) => `receiver-device-${d.deviceKey}`),
-    ];
-    if (nodeIds.length === 0) return;
-
-    const validSaved = nodeIds.filter((id) => isValidSavedPosition(nodePositionsRef.current[id])).length;
-
-    if (!layoutSeededRef.current && validSaved === 0) {
-      layoutSeededRef.current = true;
-      userLayoutRef.current = false;
-      setAutoMeasureLayout(true);
-      persistPositions(computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys));
-      return;
-    }
-
-    if (validSaved < nodeIds.length) {
-      const merged = mergeLayoutWithNewDevices(
-        nodePositionsRef.current,
-        snapshot.senders,
-        snapshot.receivers,
-        expandedDeviceKeys,
-        compactDeviceKeys,
-      );
-      const changed = nodeIds.some((id) => {
-        const before = nodePositionsRef.current[id];
-        const after = merged[id];
-        if (!isValidSavedPosition(before)) return after != null;
-        return before.x !== after?.x || before.y !== after?.y;
-      });
-      if (changed) persistPositions(merged);
-    }
-
-    layoutSeededRef.current = true;
-  }, [
-    loading,
-    snapshot.senders,
-    snapshot.receivers,
-    expandedDeviceKeys,
-    persistPositions,
-    compactDeviceKeys,
-  ]);
-
-  useEffect(() => {
-    try {
-      if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return;
-      const saved = JSON.parse(localStorage.getItem('ndi-multichannel-node-positions') || '{}');
-      if (Object.values(saved).some(isValidSavedPosition)) {
-        userLayoutRef.current = true;
-        setAutoMeasureLayout(false);
-      }
-    } catch {
-      // Ignore malformed layout cache.
-    }
-  }, []);
-
-  const onConnectStart = useCallback((_evt, params) => {
-    const { sourceName } = resolveConnectionDetails(params, snapshot);
-    setConnectPreview({ x: _evt.clientX, y: _evt.clientY, sourceName: sourceName || '—' });
-  }, [snapshot, resolveConnectionDetails]);
-
-  const onConnectEnd = useCallback(() => {
-    setConnectPreview(null);
-  }, []);
-
-  const onConnect = useCallback(async (params) => {
-    setConnectPreview(null);
-    const details = resolveConnectionDetails(params, snapshot);
-    const { sourceName, receiverUuid } = details;
-    if (!receiverUuid || !sourceName) return;
-
-    blockPollingDuringMutation();
-    markPendingReceiver(receiverUuid);
-    rememberOptimisticConnection(details);
-    try {
-      const response = await axios.post(`${API_BASE}/connect`, { receiverUuid, sourceName });
-      if (!response?.data?.success) {
-        clearOptimisticConnection(receiverUuid);
-        toast(`Connect failed: ${response?.data?.message ?? 'error'}`, 'error');
-      } else {
-        toast(`Connect sent → ${sourceName}`, 'success');
-        fetchDevices(true);
-      }
-    } catch {
-      clearOptimisticConnection(receiverUuid);
-      toast('Connect error', 'error');
-    } finally {
-      setTimeout(() => fetchDevices(true), 400);
-      setTimeout(() => fetchDevices(true), 1200);
-    }
-  }, [
-    snapshot,
-    fetchDevices,
-    blockPollingDuringMutation,
-    resolveConnectionDetails,
-    markPendingReceiver,
-    rememberOptimisticConnection,
-    clearOptimisticConnection,
-    toast,
-  ]);
-
-  const onEdgesDelete = useCallback(async (edgesToDelete) => {
-    blockPollingDuringMutation();
-    for (const edge of edgesToDelete) {
-      const receiverUuid = edge?.data?.receiverUuid;
-      if (!receiverUuid) continue;
-      clearOptimisticConnection(receiverUuid);
-      suppressReceiverConnection(receiverUuid);
-      try {
-        const response = await axios.post(`${API_BASE}/disconnect`, { receiverUuid });
-        if (!response.data?.success) {
-          toast(`Disconnect failed: ${response.data?.message ?? 'error'}`, 'error');
-        } else {
-          toast('Disconnect sent', 'success');
-        }
-      } catch {
-        toast('Disconnect error', 'error');
-      }
-    }
-    setTimeout(() => fetchDevices(true), 800);
-    setTimeout(() => fetchDevices(true), 1800);
-  }, [fetchDevices, blockPollingDuringMutation, suppressReceiverConnection, clearOptimisticConnection, toast]);
-
-  const disconnectEdgeByReceiver = useCallback(async (edge) => {
-    const receiverUuid = edge?.data?.receiverUuid;
-    if (!receiverUuid) return;
-    await disconnectReceiver(receiverUuid);
-  }, [disconnectReceiver]);
-
-  const onReconnectStart = useCallback(() => {
-    edgeReconnectSuccessful.current = false;
-  }, []);
-
-  const onReconnect = useCallback(async (_oldEdge, newConnection) => {
-    edgeReconnectSuccessful.current = true;
-    const oldReceiverUuid = _oldEdge?.data?.receiverUuid || '';
-    const { sourceName, receiverUuid: newReceiverUuid } = resolveConnectionDetails(newConnection, snapshot);
-    if (!newReceiverUuid || !sourceName) return;
-
-    blockPollingDuringMutation();
-    markPendingReceiver(newReceiverUuid);
-    rememberOptimisticConnection(resolveConnectionDetails(newConnection, snapshot));
-    if (oldReceiverUuid && oldReceiverUuid !== newReceiverUuid) {
-      clearOptimisticConnection(oldReceiverUuid);
-      suppressReceiverConnection(oldReceiverUuid);
-    }
-    suppressReceiverConnection(newReceiverUuid, 2000);
-
-    try {
-      if (oldReceiverUuid && oldReceiverUuid !== newReceiverUuid) {
-        await axios.post(`${API_BASE}/disconnect`, { receiverUuid: oldReceiverUuid });
-      }
-      const connectResponse = await axios.post(`${API_BASE}/connect`, { receiverUuid: newReceiverUuid, sourceName });
-      if (!connectResponse?.data?.success) {
-        clearOptimisticConnection(newReceiverUuid);
-        toast(`Reconnect failed: ${connectResponse?.data?.message ?? 'error'}`, 'error');
-      } else {
-        toast(`Reconnect → ${sourceName}`, 'success');
-      }
-    } catch {
-      clearOptimisticConnection(newReceiverUuid);
-      toast('Reconnect error', 'error');
-    } finally {
-      setTimeout(() => fetchDevices(true), 800);
-      setTimeout(() => fetchDevices(true), 1800);
-    }
-  }, [
-    snapshot,
-    fetchDevices,
-    blockPollingDuringMutation,
-    resolveConnectionDetails,
-    suppressReceiverConnection,
-    markPendingReceiver,
-    rememberOptimisticConnection,
-    clearOptimisticConnection,
-    toast,
-  ]);
-
-  const onReconnectEnd = useCallback(async (_event, edge) => {
-    if (edgeReconnectSuccessful.current) return;
-    await disconnectEdgeByReceiver(edge);
-  }, [disconnectEdgeByReceiver]);
-
-  const handleChannelSelect = useCallback((detail) => {
-    setChannelDetail(detail);
-  }, []);
+  const handleChannelSelect = useCallback((detail) => setChannelDetail(detail), []);
 
   const dismissLegend = useCallback(() => {
     setShowLegend(false);
     localStorage.setItem('ndi-metrics-legend-seen', '1');
   }, []);
 
+  const onConnectStart = useCallback((evt, params) => {
+    const { sourceName } = resolveConnectionDetails(params, snapshot);
+    setConnectPreview({ x: evt.clientX, y: evt.clientY, sourceName: sourceName || '—' });
+  }, [snapshot]);
+
+  const onConnectEnd = useCallback(() => setConnectPreview(null), []);
+
+  const { connect } = routing;
+  const onConnect = useCallback((params) => {
+    setConnectPreview(null);
+    return connect(params);
+  }, [connect]);
+
+  // Callbacks stored in node/edge data (only created when a device's content changes).
+  const createNodeCallbacks = useCallback(({ nodeId, device, role }) => ({
+    onToggleCompactView: () => toggleCompactDevice(nodeId),
+    onToggleExpand: () => toggleDeviceExpanded(nodeId),
+    onChannelSelect: (channel) => handleChannelSelect({ device, channel, role }),
+    onFocusConnections: () => {
+      // Read through a ref: cached data may outlive the snapshot it was built from.
+      const related = visibleConnectionsRef.current.find((c) =>
+        (role === 'sender' ? c.senderDeviceKey : c.receiverDeviceKey) === device.deviceKey);
+      if (!related) return;
+      rfInstanceRef.current?.fitView({
+        nodes: [
+          { id: `sender-device-${related.senderDeviceKey}` },
+          { id: `receiver-device-${related.receiverDeviceKey}` },
+        ],
+        padding: 0.35,
+        duration: 350,
+      });
+    },
+  }), [toggleCompactDevice, toggleDeviceExpanded, handleChannelSelect]);
+
+  const createEdgeFocus = useCallback((sourceNodeId, targetNodeId) => () => {
+    rfInstanceRef.current?.fitView({
+      nodes: [{ id: sourceNodeId }, { id: targetNodeId }],
+      padding: 0.35,
+      duration: 350,
+    });
+  }, []);
+
+  // ---- snapshot / view state → React Flow nodes and edges
   useEffect(() => {
-    let filteredSenders = snapshot.senders.filter((device) =>
-      matchesFilterQuery(buildDeviceSearchText(device), senderFilter));
-    let filteredReceivers = snapshot.receivers.filter((device) =>
-      matchesFilterQuery(buildDeviceSearchText(device), receiverFilter));
+    const viewFilters = { senderFilter, receiverFilter, selectedHostKeys, showActiveOnly };
+    const { filteredSenders, filteredReceivers } = filterSnapshotDevices(snapshot, viewFilters);
 
-    filteredSenders = filterDevicesByHost(filteredSenders, selectedHostKeys);
-    filteredReceivers = filterDevicesByHost(filteredReceivers, selectedHostKeys);
-
-    if (showActiveOnly) {
-      filteredSenders = filteredSenders.filter(deviceHasActivity);
-      filteredReceivers = filteredReceivers.filter(deviceHasActivity);
-    }
-
-    const senderByDeviceKey = new Map(filteredSenders.map((d) => [d.deviceKey, d]));
-    const receiverByDeviceKey = new Map(filteredReceivers.map((d) => [d.deviceKey, d]));
-
-    const snapshotConnectionIds = new Set(
-      snapshot.connections.map((conn) => conn.receiverUuid?.toLowerCase()).filter(Boolean),
-    );
-    optimisticConnectionsRef.current.forEach((conn, receiverUuid) => {
-      if (snapshotConnectionIds.has(receiverUuid.toLowerCase())) {
-        optimisticConnectionsRef.current.delete(receiverUuid);
-      }
-    });
-
-    const mergedConnections = [...snapshot.connections];
-    optimisticConnectionsRef.current.forEach((conn) => {
-      const exists = mergedConnections.some(
-        (existing) => existing.receiverUuid?.toLowerCase() === conn.receiverUuid?.toLowerCase(),
-      );
-      if (!exists) mergedConnections.push(conn);
-    });
-
-    const connectedByDeviceKey = new Map();
-    mergedConnections.forEach((conn) => {
-      const add = (deviceKey, channelId) => {
-        if (!deviceKey || !channelId) return;
-        if (!connectedByDeviceKey.has(deviceKey)) connectedByDeviceKey.set(deviceKey, new Set());
-        connectedByDeviceKey.get(deviceKey).add(channelId);
-      };
-      add(conn.senderDeviceKey, conn.senderChannelId);
-      add(conn.receiverDeviceKey, conn.receiverChannelId);
-    });
-
-    const visibleConnections = mergedConnections.filter((conn) => {
-      if (!senderByDeviceKey.has(conn.senderDeviceKey)) return false;
-      if (!receiverByDeviceKey.has(conn.receiverDeviceKey)) return false;
-      if (isReceiverConnectionSuppressed(conn.receiverUuid)) return false;
-      if (!HIDE_INTERNAL_CONNECTIONS) return true;
-      const sender = senderByDeviceKey.get(conn.senderDeviceKey);
-      const receiver = receiverByDeviceKey.get(conn.receiverDeviceKey);
-      if (!sender || !receiver) return true;
-      const sameApp = sender.applicationId === receiver.applicationId;
-      const sameAddress = (sender.address || '') === (receiver.address || '');
-      const appIsKnown = sender.applicationId !== 'unknown' && receiver.applicationId !== 'unknown';
-      return !(sameApp && sameAddress && appIsKnown);
-    });
-
-    const logicalConnectionsByDeviceKey = new Map();
-    visibleConnections.forEach((conn) => {
-      logicalConnectionsByDeviceKey.set(
-        conn.senderDeviceKey,
-        (logicalConnectionsByDeviceKey.get(conn.senderDeviceKey) || 0) + 1,
-      );
-      logicalConnectionsByDeviceKey.set(
-        conn.receiverDeviceKey,
-        (logicalConnectionsByDeviceKey.get(conn.receiverDeviceKey) || 0) + 1,
-      );
-    });
+    forgetOptimistic(confirmedOptimisticReceivers(snapshot.connections, optimisticRef.current));
 
     const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
-    const resolvePosition = (nodeId) => {
-      const saved = nodePositionsRef.current[nodeId];
-      if (isValidSavedPosition(saved)) return saved;
-      return stackedLayout[nodeId] || { x: 80, y: 120 };
-    };
+    const positionOf = (nodeId) => resolvePosition(nodeId, stackedLayout);
 
-    const resolveNodePosition = (nodeId, node) => {
-      if (draggingNodeIdsRef.current.has(nodeId) && isValidSavedPosition(node?.position)) {
-        return node.position;
-      }
-      return resolvePosition(nodeId);
-    };
-
+    const { nodes: nextNodes, edges: nextEdges, visibleConnections } = buildFlowGraph({
+      snapshot,
+      filteredSenders,
+      filteredReceivers,
+      optimisticConnections: [...optimisticRef.current.values()],
+      isReceiverSuppressed: isReceiverConnectionSuppressed,
+      expandedDeviceKeys,
+      compactDeviceKeys,
+      resolvePosition: positionOf,
+      nodeDataCache: nodeDataCacheRef.current,
+      edgeCache: edgeCacheRef.current,
+      createNodeCallbacks,
+      createEdgeFocus,
+    });
     visibleConnectionsRef.current = visibleConnections;
-    const nodeDataCache = nodeDataCacheRef.current;
-    const liveNodeIds = new Set();
 
-    const buildNodeData = (device, rolePrefix) => {
-      const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
-      const channelCount = device.channels?.length || 0;
-      const isCollapsed = device.isBridgeHub
-        ? (channelCount > 1 ? !expandedDeviceKeys.has(nodeId) : false)
-        : channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
-      const connectedIds = connectedByDeviceKey.get(device.deviceKey) || new Set();
-      const logicalCount = logicalConnectionsByDeviceKey.get(device.deviceKey) || 0;
-      const compactView = compactDeviceKeys.has(nodeId);
-      const cacheKey = JSON.stringify([
-        device,
-        isCollapsed,
-        compactView,
-        logicalCount,
-        [...connectedIds].sort(),
-      ]);
-      liveNodeIds.add(nodeId);
-      const cached = nodeDataCache.get(nodeId);
-      if (cached && cached.key === cacheKey) return cached.data;
-
-      const data = buildFreshNodeData(device, rolePrefix, nodeId, isCollapsed, connectedIds, logicalCount, compactView);
-      nodeDataCache.set(nodeId, { key: cacheKey, data });
-      return data;
-    };
-
-    const buildFreshNodeData = (device, rolePrefix, nodeId, isCollapsed, connectedIds, logicalCount, compactView) => {
-      return {
-        ...device,
-        isAggregated: true,
-        isCollapsed,
-        maxVisibleHandles: MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
-        connectedChannelIds: connectedIds,
-        logicalConnectionCount: logicalCount,
-        compactView,
-        onToggleCompactView: () => toggleCompactDevice(nodeId),
-        onToggleExpand: () => toggleDeviceExpanded(nodeId),
-        onChannelSelect: (channel) => handleChannelSelect({
-          device,
-          channel,
-          role: rolePrefix === 'sender' ? 'sender' : 'receiver',
-        }),
-        onFocusConnections: () => {
-          // Read through a ref: cached data may outlive the snapshot it was built from.
-          const related = visibleConnectionsRef.current.filter((c) =>
-            rolePrefix === 'sender'
-              ? c.senderDeviceKey === device.deviceKey
-              : c.receiverDeviceKey === device.deviceKey);
-          if (related.length === 0) return;
-          const conn = related[0];
-          rfInstanceRef.current?.fitView({
-            nodes: [
-              { id: `sender-device-${conn.senderDeviceKey}` },
-              { id: `receiver-device-${conn.receiverDeviceKey}` },
-            ],
-            padding: 0.35,
-            duration: 350,
-          });
-        },
-      };
-    };
-
-    const senderNodes = filteredSenders.map((device) => {
-      const nodeId = `sender-device-${device.deviceKey}`;
-      return {
-        id: nodeId,
-        type: 'senderNode',
-        dragHandle: '.node-drag-handle',
-        deletable: false,
-        position: resolveNodePosition(nodeId, undefined),
-        data: buildNodeData(device, 'sender'),
-      };
-    });
-
-    const receiverNodes = filteredReceivers.map((device) => {
-      const nodeId = `receiver-device-${device.deviceKey}`;
-      return {
-        id: nodeId,
-        type: 'receiverNode',
-        dragHandle: '.node-drag-handle',
-        deletable: false,
-        position: resolveNodePosition(nodeId, undefined),
-        data: buildNodeData(device, 'receiver'),
-      };
-    });
-
-    const nextNodes = [...senderNodes, ...receiverNodes];
-    nodeDataCache.forEach((_, id) => {
-      if (!liveNodeIds.has(id)) nodeDataCache.delete(id);
-    });
     const snapshotIsEmpty = snapshot.senders.length === 0 && snapshot.receivers.length === 0;
     const structureKey = buildCanvasStructureKey({
       filteredSenders,
       filteredReceivers,
       visibleConnections,
-      selectedHostKeys,
-      senderFilter,
-      receiverFilter,
-      showActiveOnly,
       expandedDeviceKeys,
       compactDeviceKeys,
+      ...viewFilters,
     });
     const structureChanged = structureKey !== canvasStructureKeyRef.current;
     canvasStructureKeyRef.current = structureKey;
 
-    const groupedConnections = new Map();
-    visibleConnections.forEach((conn) => {
-      const pairKey = `${conn.senderDeviceKey}->${conn.receiverDeviceKey}`;
-      const list = groupedConnections.get(pairKey) || [];
-      list.push(conn);
-      groupedConnections.set(pairKey, list);
-    });
-
-    const nextEdges = [];
-    const edgeCache = edgeCacheRef.current;
-    const liveEdgeIds = new Set();
-    groupedConnections.forEach((connections) => {
-      const ordered = [...connections].sort((a, b) => {
-        const ai = Number(a.senderChannelId?.replace(/[^\d]/g, '')) || 0;
-        const bi = Number(b.senderChannelId?.replace(/[^\d]/g, '')) || 0;
-        return ai - bi;
-      });
-
-      ordered.forEach((conn, laneIndex) => {
-        const confirmed = isConnectionConfirmed(conn, snapshot);
-        const color = confirmed ? '#4ade80' : '#facc15';
-        const sourceNodeId = `sender-device-${conn.senderDeviceKey}`;
-        const targetNodeId = `receiver-device-${conn.receiverDeviceKey}`;
-        const edgeId = `edge-${conn.connectionId}`;
-        const edgeKey = JSON.stringify([conn, laneIndex, ordered.length, confirmed]);
-        liveEdgeIds.add(edgeId);
-        const cachedEdge = edgeCache.get(edgeId);
-        if (cachedEdge && cachedEdge.key === edgeKey) {
-          nextEdges.push(cachedEdge.edge);
-          return;
-        }
-
-        const edge = {
-          id: `edge-${conn.connectionId}`,
-          type: 'custom',
-          source: sourceNodeId,
-          target: targetNodeId,
-          sourceHandle: `out-${conn.senderChannelId}`,
-          targetHandle: `in-${conn.receiverChannelId}`,
-          animated: confirmed,
-          deletable: true,
-          selectable: true,
-          reconnectable: true,
-          style: { stroke: color, strokeWidth: 1.5 },
-          markerEnd: { type: MarkerType.ArrowClosed, color, width: 12, height: 12 },
-          data: {
-            senderLabel: conn.senderLabel,
-            receiverLabel: conn.receiverLabel,
-            sourceName: conn.sourceName,
-            receiverUuid: conn.receiverUuid,
-            edgeLaneIndex: laneIndex,
-            edgeLaneCount: ordered.length,
-            confirmed,
-            sourceNodeId,
-            targetNodeId,
-            onFocus: () => {
-              rfInstanceRef.current?.fitView({
-                nodes: [{ id: sourceNodeId }, { id: targetNodeId }],
-                padding: 0.35,
-                duration: 350,
-              });
-            },
-          },
-        };
-        edgeCache.set(edgeId, { key: edgeKey, edge });
-        nextEdges.push(edge);
-      });
-    });
-    edgeCache.forEach((_, id) => {
-      if (!liveEdgeIds.has(id)) edgeCache.delete(id);
-    });
-
-    if (!structureChanged) {
-      setNodes((prev) => {
-        if (prev.length === 0 && nextNodes.length > 0) return nextNodes;
-        const nextById = new Map(nextNodes.map((n) => [n.id, n]));
-        return prev.map((node) => {
-          const fresh = nextById.get(node.id);
-          if (!fresh) return node;
-          const keepDragPosition = node.position && draggingNodeIdsRef.current.has(node.id);
-          const position = keepDragPosition ? node.position : resolvePosition(node.id);
-          if (node.data === fresh.data && samePosition(node.position, position)) return node;
-          return {
-            ...node,
-            data: fresh.data,
-            position,
-          };
-        });
-      });
-      setEdges((prev) => mergeEdges(prev, nextEdges, snapshotIsEmpty));
-      if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
-      return;
+    if (structureChanged) {
+      setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current, snapshotIsEmpty));
+    } else {
+      setNodes((prev) => refreshNodes(prev, nextNodes, draggingNodeIdsRef.current, positionOf));
     }
-
-    setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current, snapshotIsEmpty));
     setEdges((prev) => mergeEdges(prev, nextEdges, snapshotIsEmpty));
-    if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
   }, [
     snapshot,
-    setNodes,
-    setEdges,
-    isFirstLoad,
-    isReceiverConnectionSuppressed,
     senderFilter,
     receiverFilter,
     selectedHostKeys,
     showActiveOnly,
     expandedDeviceKeys,
-    toggleDeviceExpanded,
-    handleChannelSelect,
-    pendingEpoch,
-    isReceiverPending,
     compactDeviceKeys,
-    toggleCompactDevice,
+    routing.epoch,
+    optimisticRef,
+    forgetOptimistic,
+    isReceiverConnectionSuppressed,
+    resolvePosition,
+    draggingNodeIdsRef,
+    createNodeCallbacks,
+    createEdgeFocus,
+    setNodes,
+    setEdges,
   ]);
 
+  // Follow the mouse while dragging a new connection (listener only while a drag is active).
+  const isConnecting = connectPreview != null;
   useEffect(() => {
-    fetchDevices(true);
-    fetchStatus();
-  }, [fetchDevices, fetchStatus]);
-
-  // Push is the primary channel; polling is a fast fallback only while push is down,
-  // and a slow safety net while it is live (status arrives with every push).
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchDevices(false);
-      if (!pushLive) fetchStatus();
-    }, pushLive ? LIVE_SAFETY_POLL_MS : FALLBACK_POLL_MS);
-    return () => clearInterval(interval);
-  }, [fetchDevices, fetchStatus, pushLive]);
-
-  useEffect(() => {
-    if (!connectPreview) return undefined;
+    if (!isConnecting) return undefined;
     const move = (e) => setConnectPreview((p) => (p ? { ...p, x: e.clientX, y: e.clientY } : p));
     window.addEventListener('mousemove', move);
     return () => window.removeEventListener('mousemove', move);
-  }, [connectPreview]);
+  }, [isConnecting]);
 
   if (loading) {
     return <div style={styles.container} />;
@@ -1401,28 +307,27 @@ export default function NDIFlowEditor() {
   }
 
   const health = systemStatus?.health || 'unknown';
-  const linkState = backendOfflineSince
-    ? 'offline'
-    : pushLive
-      ? 'live'
-      : signalRState === 'reconnecting' || signalRState === 'connecting'
-        ? 'reconnecting'
-        : 'polling';
-  const linkLabel = {
-    live: 'Live',
-    reconnecting: 'Reconnecting…',
-    polling: 'Polling',
-    offline: 'Offline',
-  }[linkState];
-  const linkTitle = {
-    live: 'Real-time updates (SignalR) connected',
-    reconnecting: 'Real-time channel reconnecting; polling every 2 s meanwhile',
-    polling: 'Real-time channel unavailable; polling every 2 s',
-    offline: 'Backend unreachable; showing last known state',
-  }[linkState];
+  const linkLabel = LINK_LABELS[linkState];
+  const linkTitle = LINK_TITLES[linkState];
   const discoveryLabel = systemStatus
     ? `${systemStatus.sendListenerConnected && systemStatus.recvListenerConnected ? 'Discovery OK' : 'Discovery partial'} · ${systemStatus.senderCount} snd · ${systemStatus.receiverCount} rcv`
     : 'Discovery…';
+  const {
+    resetLayout,
+    alignLayoutByHost,
+    saveCurrentHostPreset,
+    loadCurrentHostPreset,
+    handleMeasuredLayout,
+    handleNodesChange,
+  } = layout;
+  const {
+    bulkDisconnectHost,
+    disconnectReceiver,
+    disconnectEdges: onEdgesDelete,
+    onReconnectStart,
+    onReconnect,
+    onReconnectEnd,
+  } = routing;
 
   return (
     <div style={styles.container}>
@@ -1532,11 +437,11 @@ export default function NDIFlowEditor() {
             {showLegend ? <MetricsLegend onClose={dismissLegend} /> : null}
             <ReactFlowProvider>
               <AutoMeasureLayout
-                enabled={autoMeasureLayout}
+                enabled={layout.autoMeasureLayout}
                 senders={snapshot.senders}
                 receivers={snapshot.receivers}
                 expandedDeviceKeys={expandedDeviceKeys}
-                expandedLayoutEpoch={expandedLayoutEpoch}
+                expandedLayoutEpoch={layout.layoutEpoch}
                 onLayout={handleMeasuredLayout}
               />
               <FlowCanvas
@@ -1554,7 +459,8 @@ export default function NDIFlowEditor() {
                 onInit={(inst) => { rfInstanceRef.current = inst; }}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                fitView={isFirstLoad}
+                // Queued once at mount and applied when the first nodes are measured.
+                fitView
                 selectNodesOnDrag={false}
                 nodeDragThreshold={2}
                 minZoom={0.05}

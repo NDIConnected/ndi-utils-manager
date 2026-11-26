@@ -39,8 +39,7 @@ export default function CustomEdge({
   data,
 }) {
   const { deleteElements, setEdges } = useReactFlow();
-  const laneIndex = Number(data?.edgeLaneIndex ?? 0);
-  const laneCount = Math.max(1, Number(data?.edgeLaneCount ?? 1));
+  // Parallel edges share the same path for now (data.edgeLaneIndex/edgeLaneCount are available for offsets).
   const laneOffset = 0;
   const mostlyHorizontal = Math.abs(targetX - sourceX) >= Math.abs(targetY - sourceY);
   const confirmed = data?.confirmed !== false;

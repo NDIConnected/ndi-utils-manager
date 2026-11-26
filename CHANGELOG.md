@@ -41,6 +41,13 @@
 - Align by host with a host filter keeps the other hosts' positions; host presets restore only that host's nodes.
 - Newly discovered devices are placed below existing ones (including saved slots of offline devices) instead of overlapping them.
 
+### Code / tooling
+
+- `NDIFlowEditor.jsx` split from ~1,600 to ~520 lines: data (`useNdiSnapshot`), routing (`useRouting`) and layout (`useCanvasLayout`) hooks, plus pure modules (`flowGraph`, `flowFilters`, `routing`, `snapshotOrder`). No intended behavior change.
+- **Unit tests** with Vitest (`npm test`, 43 tests) for filters, graph building, optimistic connections, snapshot ordering, routing helpers and layout.
+- `npm run lint` is clean (0 problems): removed dead code and moved non-component exports out of component files (Fast Refresh).
+- Canvas `fitView` is queued once at mount instead of being toggled by a first-load flag.
+
 ## [Version 3.2.1] - 2026-07
 
 ### Docs / licensing
