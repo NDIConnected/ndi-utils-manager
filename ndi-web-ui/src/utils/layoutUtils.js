@@ -22,6 +22,63 @@ const STATS_SECTIONS_HEIGHT = 110;
 const COLLAPSE_BUTTON_HEIGHT = 40;
 const BRIDGE_HUB_EXTRA_HEIGHT = 88;
 const MEASURED_HEIGHT_FALLBACK = 420;
+// One-line "minimized" card (see MiniNodeCard / .ndi-mini-card).
+const MINI_NODE_HEIGHT = 36;
+const MINI_VERTICAL_GAP = 14;
+
+/** Space below a card: one-line cards stack tightly, full cards keep room for edges and handles. */
+export function verticalGapAfter(height) {
+  return height <= MINI_NODE_HEIGHT + 6 ? MINI_VERTICAL_GAP : NODE_VERTICAL_PADDING;
+}
+
+/**
+ * "Accordion" re-pack after cards change size: within each column (cards whose x is within
+ * `columnTolerance`), keep the order and the top of the column and re-stack the cards with
+ * {@link verticalGapAfter}. Positions of other columns are unchanged.
+ *
+ * @param {{ id: string, x: number, y: number, height: number }[]} boxes
+ * @returns {Record<string, { x: number, y: number }>}
+ */
+export function repackColumns(boxes, columnTolerance = 40) {
+  const columns = [];
+  [...boxes].sort((a, b) => a.x - b.x).forEach((box) => {
+    const column = columns.find((c) => Math.abs(c.x - box.x) <= columnTolerance);
+    if (column) column.items.push(box);
+    else columns.push({ x: box.x, items: [box] });
+  });
+
+  const positions = {};
+  columns.forEach(({ items }) => {
+    items.sort((a, b) => a.y - b.y);
+    let y = items[0].y;
+    items.forEach((box) => {
+      positions[box.id] = { x: box.x, y };
+      y += box.height + verticalGapAfter(box.height);
+    });
+  });
+  return positions;
+}
+
+/**
+ * Card view of a node: 'mini' (one line), 'compact' or false (detailed).
+ * `viewKeys` is either a Set of compact node ids, or a Map nodeId → 'compact' | 'mini'.
+ * Data on a rendered node wins (it is what React Flow measured).
+ */
+export function nodeViewMode(nodeId, viewKeys, node) {
+  if (node?.data?.minimized) return 'mini';
+  if (node?.data?.compactView) return 'compact';
+  if (!nodeId || !viewKeys) return false;
+  if (viewKeys instanceof Map) return viewKeys.get(nodeId) || false;
+  return viewKeys.has(nodeId) ? 'compact' : false;
+}
+
+/** Map nodeId → 'mini' | 'compact' for the layout helpers (minimized wins over compact). */
+export function buildViewModeMap(compactDeviceKeys = new Set(), minimizedDeviceKeys = new Set()) {
+  const map = new Map();
+  compactDeviceKeys.forEach((id) => map.set(id, 'compact'));
+  minimizedDeviceKeys.forEach((id) => map.set(id, 'mini'));
+  return map;
+}
 
 export function estimateAggregatedNodeHeight(
   device,
@@ -30,6 +87,7 @@ export function estimateAggregatedNodeHeight(
   compactView = false,
 ) {
   const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
+  if (compactView === 'mini') return MINI_NODE_HEIGHT;
   const channelCount = device?.channels?.length || 0;
   if (channelCount === 0) return compactView ? 120 : 220;
 
@@ -67,11 +125,10 @@ function getNodeHeight(node, device, expandedDeviceKeys, rolePrefix, compactDevi
   const nodeId = device?.deviceKey
     ? `${rolePrefix}-device-${device.deviceKey}`
     : node?.id;
-  const compactView = node?.data?.compactView === true
-    || (nodeId ? compactDeviceKeys.has(nodeId) : false);
+  const compactView = nodeViewMode(nodeId, compactDeviceKeys, node);
   const estimated = device
     ? estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compactView)
-    : (compactView ? 140 : MEASURED_HEIGHT_FALLBACK);
+    : (compactView === 'mini' ? MINI_NODE_HEIGHT : compactView ? 140 : MEASURED_HEIGHT_FALLBACK);
 
   const measured = node?.measured?.height ?? node?.height;
   if (Number.isFinite(measured) && measured > 0) {
@@ -130,8 +187,7 @@ function getNodeWidth(node, device, rolePrefix, compactDeviceKeys = new Set()) {
   const nodeId = device?.deviceKey
     ? `${rolePrefix}-device-${device.deviceKey}`
     : node?.id;
-  const compactView = node?.data?.compactView === true
-    || (nodeId ? compactDeviceKeys.has(nodeId) : false);
+  const compactView = nodeViewMode(nodeId, compactDeviceKeys, node);
   const estimated = device
     ? estimateAggregatedNodeWidth(device, rolePrefix, compactView)
     : NODE_MIN_WIDTH;
@@ -159,7 +215,8 @@ function stackDevicesWithHeights(devices, rolePrefix, x, getHeight) {
   devices.forEach((device) => {
     const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
     positions[nodeId] = { x, y };
-    y += getHeight(nodeId, device) + NODE_VERTICAL_PADDING;
+    const height = getHeight(nodeId, device);
+    y += height + verticalGapAfter(height);
   });
 
   return positions;
@@ -174,7 +231,7 @@ function stackDevices(devices, rolePrefix, x, expandedDeviceKeys, compactDeviceK
       device,
       expandedDeviceKeys,
       rolePrefix,
-      compactDeviceKeys.has(nodeId),
+      nodeViewMode(nodeId, compactDeviceKeys),
     ),
   );
 }
@@ -208,7 +265,7 @@ function buildHeightResolver(
       device,
       expandedDeviceKeys,
       rolePrefix,
-      compactDeviceKeys.has(nodeId),
+      nodeViewMode(nodeId, compactDeviceKeys),
     );
   };
 }
@@ -229,7 +286,7 @@ export function computeLayoutFromMeasuredNodes(
     const node = nodeById.get(nodeId);
     const height = getNodeHeight(node, device, expandedDeviceKeys, 'sender', compactDeviceKeys);
     positions[nodeId] = { x: DEFAULT_SENDER_X, y: senderY };
-    senderY += height + NODE_VERTICAL_PADDING;
+    senderY += height + verticalGapAfter(height);
   });
 
   let receiverY = DEFAULT_NODE_Y_START;
@@ -238,7 +295,7 @@ export function computeLayoutFromMeasuredNodes(
     const node = nodeById.get(nodeId);
     const height = getNodeHeight(node, device, expandedDeviceKeys, 'receiver', compactDeviceKeys);
     positions[nodeId] = { x: DEFAULT_RECEIVER_X, y: receiverY };
-    receiverY += height + NODE_VERTICAL_PADDING;
+    receiverY += height + verticalGapAfter(height);
   });
 
   return positions;
@@ -342,16 +399,17 @@ export function mergeLayoutWithNewDevices(
       if (!nodeId.startsWith(prefix)) return;
       const device = deviceById.get(nodeId);
       const height = device
-        ? estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compactDeviceKeys.has(nodeId))
+        ? estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, nodeViewMode(nodeId, compactDeviceKeys))
         : MEASURED_HEIGHT_FALLBACK;
-      nextY = Math.max(nextY, pos.y + height + NODE_VERTICAL_PADDING);
+      nextY = Math.max(nextY, pos.y + height + verticalGapAfter(height));
     });
     devices.forEach((device) => {
       const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
       if (merged[nodeId]) return;
       merged[nodeId] = { x, y: nextY };
-      const compact = compactDeviceKeys.has(nodeId);
-      nextY += estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compact) + NODE_VERTICAL_PADDING;
+      const compact = nodeViewMode(nodeId, compactDeviceKeys);
+      const height = estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compact);
+      nextY += height + verticalGapAfter(height);
     });
   };
 

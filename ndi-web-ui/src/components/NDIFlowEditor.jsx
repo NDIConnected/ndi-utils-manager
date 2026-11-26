@@ -22,7 +22,7 @@ import { useNdiSnapshot } from '../hooks/useNdiSnapshot';
 import { useRouting } from '../hooks/useRouting';
 import { useCanvasLayout } from '../hooks/useCanvasLayout';
 import { buildHostGroups } from '../utils/deviceGrouping';
-import { computeDefaultLayout, getBundleLabel } from '../utils/layoutUtils';
+import { buildViewModeMap, computeDefaultLayout, getBundleLabel } from '../utils/layoutUtils';
 import { filterSnapshotDevices } from '../utils/flowFilters';
 import { resolveConnectionDetails } from '../utils/routing';
 import {
@@ -47,12 +47,23 @@ const LINK_TITLES = {
   offline: 'Backend unreachable; showing last known state',
 };
 
-function loadCompactDeviceKeys() {
+const COMPACT_KEYS_STORAGE = 'ndi-compact-device-keys';
+const MINIMIZED_KEYS_STORAGE = 'ndi-minimized-device-keys';
+
+function loadKeySet(storageKey) {
   try {
-    const raw = localStorage.getItem('ndi-compact-device-keys');
+    const raw = localStorage.getItem(storageKey);
     return raw ? new Set(JSON.parse(raw)) : new Set();
   } catch {
     return new Set();
+  }
+}
+
+function saveKeySet(storageKey, set) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...set]));
+  } catch {
+    // Storage unavailable: the view still applies for this session.
   }
 }
 
@@ -85,7 +96,13 @@ export default function NDIFlowEditor() {
   const [viewMode, setViewMode] = useState('overview');
   const [selectedHostKeys, setSelectedHostKeys] = useState(() => new Set());
   const [showLegend, setShowLegend] = useState(() => localStorage.getItem('ndi-metrics-legend-seen') !== '1');
-  const [compactDeviceKeys, setCompactDeviceKeys] = useState(loadCompactDeviceKeys);
+  const [compactDeviceKeys, setCompactDeviceKeys] = useState(() => loadKeySet(COMPACT_KEYS_STORAGE));
+  // One-line cards (role + "HOST (Stream)"); wins over compact/detailed while set.
+  const [minimizedDeviceKeys, setMinimizedDeviceKeys] = useState(() => loadKeySet(MINIMIZED_KEYS_STORAGE));
+  const layoutViewModes = useMemo(
+    () => buildViewModeMap(compactDeviceKeys, minimizedDeviceKeys),
+    [compactDeviceKeys, minimizedDeviceKeys],
+  );
   const [expandedDeviceKeys, setExpandedDeviceKeys] = useState(() => new Set());
   const [channelDetail, setChannelDetail] = useState(null);
   const [connectPreview, setConnectPreview] = useState(null);
@@ -130,7 +147,7 @@ export default function NDIFlowEditor() {
     selectedHostKeys,
     singleHostKey,
     expandedDeviceKeys,
-    compactDeviceKeys,
+    compactDeviceKeys: layoutViewModes,
     filters: presetFilters,
     applyFilters: applyPresetFilters,
     setNodes,
@@ -138,7 +155,7 @@ export default function NDIFlowEditor() {
     rfInstanceRef,
     toast,
   });
-  const { resolvePosition, draggingNodeIdsRef, requestAutoLayout } = layout;
+  const { resolvePosition, draggingNodeIdsRef, requestAutoLayout, relayoutAfterResize } = layout;
 
   // ---- derived view data
   const nodeTypes = useMemo(() => ({ senderNode: SenderNode, receiverNode: ReceiverNode }), []);
@@ -161,11 +178,34 @@ export default function NDIFlowEditor() {
   const toggleCompactDevice = useCallback((nodeId) => {
     setCompactDeviceKeys((prev) => {
       const next = toggleInSet(prev, nodeId);
-      localStorage.setItem('ndi-compact-device-keys', JSON.stringify([...next]));
+      saveKeySet(COMPACT_KEYS_STORAGE, next);
       return next;
     });
     requestAutoLayout();
   }, [requestAutoLayout]);
+
+  const toggleMinimizedDevice = useCallback((nodeId) => {
+    setMinimizedDeviceKeys((prev) => {
+      const next = toggleInSet(prev, nodeId);
+      saveKeySet(MINIMIZED_KEYS_STORAGE, next);
+      return next;
+    });
+    relayoutAfterResize();
+  }, [relayoutAfterResize]);
+
+  /** Toolbar: minimize every card on the canvas, or restore them all when they already are. */
+  const visibleNodeIds = useMemo(() => nodes.map((n) => n.id), [nodes]);
+  const allMinimized = visibleNodeIds.length > 0 && visibleNodeIds.every((id) => minimizedDeviceKeys.has(id));
+  const toggleMinimizeAll = useCallback(() => {
+    setMinimizedDeviceKeys((prev) => {
+      const next = new Set(prev);
+      if (allMinimized) visibleNodeIds.forEach((id) => next.delete(id));
+      else visibleNodeIds.forEach((id) => next.add(id));
+      saveKeySet(MINIMIZED_KEYS_STORAGE, next);
+      return next;
+    });
+    relayoutAfterResize();
+  }, [allMinimized, visibleNodeIds, relayoutAfterResize]);
 
   const toggleDeviceExpanded = useCallback((nodeId) => {
     setExpandedDeviceKeys((prev) => toggleInSet(prev, nodeId));
@@ -195,6 +235,7 @@ export default function NDIFlowEditor() {
   // Callbacks stored in node/edge data (only created when a device's content changes).
   const createNodeCallbacks = useCallback(({ nodeId, device, role }) => ({
     onToggleCompactView: () => toggleCompactDevice(nodeId),
+    onToggleMinimized: () => toggleMinimizedDevice(nodeId),
     onToggleExpand: () => toggleDeviceExpanded(nodeId),
     onChannelSelect: (channel) => handleChannelSelect({ device, channel, role }),
     onFocusConnections: () => {
@@ -211,7 +252,7 @@ export default function NDIFlowEditor() {
         duration: 350,
       });
     },
-  }), [toggleCompactDevice, toggleDeviceExpanded, handleChannelSelect]);
+  }), [toggleCompactDevice, toggleMinimizedDevice, toggleDeviceExpanded, handleChannelSelect]);
 
   const createEdgeFocus = useCallback((sourceNodeId, targetNodeId) => () => {
     rfInstanceRef.current?.fitView({
@@ -228,7 +269,7 @@ export default function NDIFlowEditor() {
 
     forgetOptimistic(confirmedOptimisticReceivers(snapshot.connections, optimisticRef.current));
 
-    const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys);
+    const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, layoutViewModes);
     const positionOf = (nodeId) => resolvePosition(nodeId, stackedLayout);
 
     const { nodes: nextNodes, edges: nextEdges, visibleConnections } = buildFlowGraph({
@@ -239,6 +280,7 @@ export default function NDIFlowEditor() {
       isReceiverSuppressed: isReceiverConnectionSuppressed,
       expandedDeviceKeys,
       compactDeviceKeys,
+      minimizedDeviceKeys,
       resolvePosition: positionOf,
       nodeDataCache: nodeDataCacheRef.current,
       edgeCache: edgeCacheRef.current,
@@ -254,6 +296,7 @@ export default function NDIFlowEditor() {
       visibleConnections,
       expandedDeviceKeys,
       compactDeviceKeys,
+      minimizedDeviceKeys,
       ...viewFilters,
     });
     const structureChanged = structureKey !== canvasStructureKeyRef.current;
@@ -273,6 +316,8 @@ export default function NDIFlowEditor() {
     showActiveOnly,
     expandedDeviceKeys,
     compactDeviceKeys,
+    minimizedDeviceKeys,
+    layoutViewModes,
     routing.epoch,
     optimisticRef,
     forgetOptimistic,
@@ -375,6 +420,17 @@ export default function NDIFlowEditor() {
             <div style={styles.toolbar}>
               <button type="button" style={styles.viewBtn(false)} onClick={resetLayout}>Reset layout</button>
               <button type="button" style={styles.viewBtn(false)} onClick={alignLayoutByHost}>Align by host</button>
+              <button
+                type="button"
+                style={styles.viewBtn(allMinimized)}
+                onClick={toggleMinimizeAll}
+                disabled={visibleNodeIds.length === 0}
+                title={allMinimized
+                  ? 'Restore every card on the canvas'
+                  : 'Shrink every card on the canvas to one line (role + HOST (Stream)). Per card: chevron or double-click the header.'}
+              >
+                {allMinimized ? '▾ Expand all' : '▴ Minimize all'}
+              </button>
               {singleHostKey ? (
                 <>
                   <button type="button" style={styles.viewBtn(false)} onClick={saveCurrentHostPreset}>Save preset</button>

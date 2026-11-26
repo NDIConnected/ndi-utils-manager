@@ -27,6 +27,8 @@
 ### Web UI
 
 - Sender and receiver card titles use NDI naming, **`HOST (Stream)`** (e.g. `ISE-DEMO (Mic)`, `LENOVO-02 (NDI-Studio-Monitor)`), so the machine publishing the endpoints is always visible; just the stream name when the host is unknown. Bridge hubs keep `NDI Bridge · <host>`.
+- **Minimize cards to one line**: a pill with role (SENDER / RECEIVER), activity dot and `HOST (Stream)`; handles stay so edges remain attached and new routes can be dropped. Toggle per card with the chevron in the header or by double-clicking it (double-click the pill to restore); **Minimize all / Expand all** in the toolbar. Remembered per device (localStorage).
+- Minimizing or expanding re-packs each column like an accordion (same order and columns, no gaps or overlaps); one-line cards stack with a tight 14 px gap.
 - Canvas nodes are no longer deletable: pressing Backspace on a selected device no longer disconnects all of its routes.
 - Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (previous graph is kept only while the backend snapshot is empty).
 - Optimistic connections are drawn as pending (yellow, dashed) until the receiver confirms, expire after 8 s with a warning, and are cleared on every disconnect / failed reconnect path.

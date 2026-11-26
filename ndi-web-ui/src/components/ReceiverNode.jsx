@@ -4,7 +4,7 @@ import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 import { formatCount } from '../utils/formatStats';
 import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import ReceiverStatsSections from './ReceiverStatsSections';
-import { HiddenChannelHandles, CompactStackedHandles } from './CompactNodeParts';
+import { HiddenChannelHandles, CompactStackedHandles, CollapseToggle, MiniNodeCard } from './CompactNodeParts';
 import {
   compactCardStyle,
   compactHeaderStyle,
@@ -268,6 +268,28 @@ function ReceiverNode({ data }) {
     const totalDroppedFrames = sumDroppedFrames(channels);
     const hasWarning = channels.some((ch) => channelHealthWarning(ch, { checkConnectedWithoutSource: true }));
 
+    if (data?.minimized) {
+      return (
+        <MiniNodeCard
+          role="receiver"
+          title={appDisplayName}
+          active={hasActivity}
+          scheme={{
+            accent: '#93c5fd',
+            border: hasActivity ? '#3b82f6' : '#4b5563',
+            from: hasActivity ? '#1e3a8a' : '#1f2937',
+            to: hasActivity ? '#1e40af' : '#374151',
+          }}
+          warning={hasWarning}
+          channels={channels}
+          connectedChannelIds={connectedChannelIds}
+          handleStyle={styles.channelHandle}
+          getHandleTitle={(channel, idx) => getConnectionLabel(channel, idx)}
+          onExpand={data?.onToggleMinimized}
+        />
+      );
+    }
+
     if (data?.compactView) {
       const cardStyle = compactCardStyle({
         border: hasActivity ? '#3b82f6' : '#4b5563',
@@ -276,7 +298,7 @@ function ReceiverNode({ data }) {
         handleSide: 'left',
       });
       return (
-        <div style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+        <div key="compact" className="ndi-card-enter" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
           <CompactStackedHandles
             channels={channels}
             prefix="in"
@@ -286,13 +308,16 @@ function ReceiverNode({ data }) {
             visibleHandleStyle={styles.channelHandle}
             getTitle={(channel, idx) => getConnectionLabel(channel, idx)}
           />
-          <div {...nodeDragHandleProps(compactHeaderStyle())}>
+          <div {...nodeDragHandleProps(compactHeaderStyle())} onDoubleClick={data?.onToggleMinimized}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
               <div style={styles.indicator(hasActivity)} />
               <span>RECEIVER DEVICE</span>
               {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
             </div>
-            <span style={styles.badge(hasActivity)}>{channels.length} ch</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={styles.badge(hasActivity)}>{channels.length} ch</span>
+              <CollapseToggle collapsed={false} onToggle={data?.onToggleMinimized} />
+            </div>
           </div>
           <div {...compactToggleTitleProps(data?.onToggleCompactView)} title={appDisplayName}>{appDisplayName}</div>
           <div style={compactAddressRowStyle()}>
@@ -304,15 +329,18 @@ function ReceiverNode({ data }) {
     }
 
     return (
-      <div style={styles.node(hasActivity)}>
-        <div {...nodeDragHandleProps(styles.header)}>
+      <div key="detailed" className="ndi-card-enter" style={styles.node(hasActivity)}>
+        <div {...nodeDragHandleProps(styles.header)} onDoubleClick={data?.onToggleMinimized}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(hasActivity)} />
             <span>RECEIVER DEVICE</span>
           </div>
-          <span style={styles.badge(hasActivity)}>
-            {channels.length} ch
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={styles.badge(hasActivity)}>
+              {channels.length} ch
+            </span>
+            <CollapseToggle collapsed={false} onToggle={data?.onToggleMinimized} />
+          </div>
         </div>
 
         {(() => {

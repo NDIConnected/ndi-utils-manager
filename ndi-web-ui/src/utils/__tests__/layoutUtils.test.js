@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildViewModeMap,
   computeDefaultLayout,
   estimateAggregatedNodeHeight,
   isValidSavedPosition,
   mergeLayoutWithNewDevices,
+  nodeViewMode,
+  repackColumns,
 } from '../layoutUtils';
 import { channel, device } from './fixtures';
 
@@ -47,5 +50,50 @@ describe('mergeLayoutWithNewDevices', () => {
   it('ignores invalid saved positions', () => {
     const merged = mergeLayoutWithNewDevices({ 'sender-device-a': { x: NaN, y: 1 } }, [senders[0]], []);
     expect(isValidSavedPosition(merged['sender-device-a'])).toBe(true);
+  });
+});
+
+describe('minimized (one-line) cards', () => {
+  it('nodeViewMode: minimized wins over compact; accepts a Set or a Map', () => {
+    const map = buildViewModeMap(new Set(['a', 'b']), new Set(['b']));
+    expect(nodeViewMode('a', map)).toBe('compact');
+    expect(nodeViewMode('b', map)).toBe('mini');
+    expect(nodeViewMode('c', map)).toBe(false);
+    expect(nodeViewMode('a', new Set(['a']))).toBe('compact');
+    expect(nodeViewMode('x', new Set(), { data: { minimized: true } })).toBe('mini');
+  });
+
+  it('estimates a short height for minimized cards and stacks them tightly', () => {
+    const mini = estimateAggregatedNodeHeight(senders[0], new Set(), 'sender', 'mini');
+    expect(mini).toBeLessThan(60);
+    const ids = senders.map((d) => `sender-device-${d.deviceKey}`);
+    const layout = computeDefaultLayout(senders, [], new Set(), buildViewModeMap(new Set(), new Set(ids)));
+    const gap = layout[ids[1]].y - layout[ids[0]].y;
+    expect(gap).toBeLessThan(120);
+    const detailedGap = computeDefaultLayout(senders, [])[ids[1]].y - computeDefaultLayout(senders, [])[ids[0]].y;
+    expect(gap).toBeLessThan(detailedGap);
+  });
+});
+
+describe('repackColumns (accordion after minimize / expand)', () => {
+  it('re-stacks each column from its top, keeping order and x, with tight gaps for one-line cards', () => {
+    const positions = repackColumns([
+      { id: 'b', x: 80, y: 600, height: 36 },
+      { id: 'a', x: 82, y: 120, height: 36 },
+      { id: 'c', x: 80, y: 1100, height: 400 },
+      { id: 'r', x: 960, y: 500, height: 36 },
+    ]);
+    expect(positions.a).toEqual({ x: 82, y: 120 });
+    expect(positions.b.y).toBe(120 + 36 + 14);
+    expect(positions.c.y).toBe(positions.b.y + 36 + 14);
+    expect(positions.r).toEqual({ x: 960, y: 500 }); // other column untouched
+  });
+
+  it('pushes cards down when one expands, so they never overlap', () => {
+    const positions = repackColumns([
+      { id: 'a', x: 0, y: 0, height: 400 },
+      { id: 'b', x: 0, y: 50, height: 36 },
+    ]);
+    expect(positions.b.y).toBeGreaterThanOrEqual(400);
   });
 });

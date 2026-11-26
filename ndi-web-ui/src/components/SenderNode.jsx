@@ -4,7 +4,7 @@ import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 import { formatCount } from '../utils/formatStats';
 import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import SenderStatsSections from './SenderStatsSections';
-import { HiddenChannelHandles, CompactStackedHandles } from './CompactNodeParts';
+import { HiddenChannelHandles, CompactStackedHandles, CollapseToggle, MiniNodeCard } from './CompactNodeParts';
 import {
   compactCardStyle,
   compactHeaderStyle,
@@ -295,6 +295,29 @@ function SenderNode({ data }) {
     const totalDroppedFrames = sumDroppedFrames(channels);
     const hasWarning = channels.some((ch) => channelHealthWarning(ch));
 
+    if (data?.minimized) {
+      return (
+        <MiniNodeCard
+          role="sender"
+          title={appDisplayName}
+          active={!isLegacy && streamingChannels.length > 0}
+          scheme={{
+            accent: deviceScheme.handleBorder,
+            border: deviceScheme.border,
+            from: deviceScheme.gradient[0],
+            to: deviceScheme.gradient[1],
+          }}
+          tags={[...(isBridgeHub ? ['BRIDGE'] : []), ...(isLegacy ? ['LEGACY'] : [])]}
+          warning={hasWarning}
+          channels={channels}
+          connectedChannelIds={connectedChannelIds}
+          handleStyle={styles.channelHandle(deviceScheme)}
+          getHandleTitle={(channel, idx) => (isBridgeHub ? getBridgeChannelLabel(channel, idx) : getChannelConnectorLabel(channel, idx))}
+          onExpand={data?.onToggleMinimized}
+        />
+      );
+    }
+
     if (data?.compactView) {
       const cardStyle = compactCardStyle({
         border: deviceScheme.border,
@@ -303,8 +326,8 @@ function SenderNode({ data }) {
         handleSide: 'right',
       });
       return (
-        <div style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
-          <div {...nodeDragHandleProps(compactHeaderStyle())}>
+        <div key="compact" className="ndi-card-enter" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+          <div {...nodeDragHandleProps(compactHeaderStyle())} onDoubleClick={data?.onToggleMinimized}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
               <div style={styles.indicator(deviceScheme, !isLegacy && streamingChannels.length > 0)} />
               <span>SENDER DEVICE</span>
@@ -312,7 +335,10 @@ function SenderNode({ data }) {
               {isLegacy ? <span style={{ fontSize: 9, color: '#fcd34d' }}>LEGACY</span> : null}
               {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
             </div>
-            <span style={styles.badge(deviceScheme)}>{channels.length} ch</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={styles.badge(deviceScheme)}>{channels.length} ch</span>
+              <CollapseToggle collapsed={false} onToggle={data?.onToggleMinimized} />
+            </div>
           </div>
           <div {...compactToggleTitleProps(data?.onToggleCompactView)} title={appDisplayName}>{appDisplayName}</div>
           {appSubDisplayName ? (
@@ -338,15 +364,18 @@ function SenderNode({ data }) {
     }
 
     return (
-      <div style={styles.node(deviceScheme)}>
-        <div {...nodeDragHandleProps(styles.header)}>
+      <div key="detailed" className="ndi-card-enter" style={styles.node(deviceScheme)}>
+        <div {...nodeDragHandleProps(styles.header)} onDoubleClick={data?.onToggleMinimized}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(deviceScheme, !isLegacy)} />
             <span>SENDER DEVICE</span>
           </div>
-          <span style={styles.badge(deviceScheme)}>
-            {isBridgeHub ? `${channels.length} out` : `${channels.length} ch`}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={styles.badge(deviceScheme)}>
+              {isBridgeHub ? `${channels.length} out` : `${channels.length} ch`}
+            </span>
+            <CollapseToggle collapsed={false} onToggle={data?.onToggleMinimized} />
+          </div>
         </div>
 
         {isBridgeHub && (
