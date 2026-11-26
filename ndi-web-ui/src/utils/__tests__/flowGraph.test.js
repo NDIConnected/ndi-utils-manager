@@ -116,6 +116,26 @@ describe('buildFlowGraph', () => {
   });
 });
 
+describe('minimized cards in the graph', () => {
+  it('flags minimized nodes, rebuilds their data and changes the structure key', () => {
+    const nodeDataCache = new Map();
+    const first = graphFor(basicSnapshot(), { nodeDataCache });
+    const mini = graphFor(basicSnapshot(), { nodeDataCache, minimizedDeviceKeys: new Set(['sender-device-cam']) });
+    expect(first.nodes[0].data.minimized).toBe(false);
+    expect(mini.nodes[0].data.minimized).toBe(true);
+    expect(mini.nodes[0].data).not.toBe(first.nodes[0].data);
+    expect(mini.nodes[1].data).toBe(first.nodes[1].data);
+    expect(mini.edges).toHaveLength(1); // edges stay attached to the one-line card
+
+    const keyArgs = {
+      filteredSenders: [], filteredReceivers: [], visibleConnections: [], selectedHostKeys: new Set(),
+      senderFilter: '', receiverFilter: '', showActiveOnly: false, expandedDeviceKeys: new Set(), compactDeviceKeys: new Set(),
+    };
+    expect(buildCanvasStructureKey({ ...keyArgs, minimizedDeviceKeys: new Set(['x']) }))
+      .not.toBe(buildCanvasStructureKey(keyArgs));
+  });
+});
+
 describe('isDeviceCollapsed', () => {
   const many = Array.from({ length: COLLAPSE_CHANNELS_THRESHOLD + 1 }, (_, i) => channel(`c${i}`));
 

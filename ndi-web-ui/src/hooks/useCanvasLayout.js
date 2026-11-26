@@ -10,6 +10,7 @@ import {
   loadHostPreset,
   mergeLayoutWithNewDevices,
   isValidSavedPosition,
+  repackColumns,
 } from '../utils/layoutUtils';
 
 const NODE_LAYOUT_VERSION = '11';
@@ -117,6 +118,35 @@ export function useCanvasLayout({
     setAutoMeasureLayout(true);
     setLayoutEpoch((epoch) => epoch + 1);
   }, []);
+
+  /**
+   * After cards change size (minimize / expand): without a user layout, re-run the measured auto layout;
+   * with one, "accordion" re-pack each column (same order and columns, no gaps or overlaps).
+   */
+  const relayoutAfterResize = useCallback(() => {
+    if (!userLayoutRef.current) {
+      requestAutoLayout();
+      return;
+    }
+    let attempts = 0;
+    const run = () => {
+      const inst = rfInstanceRef.current;
+      const nodes = inst?.getNodes?.() ?? [];
+      if (nodes.length === 0) return;
+      // offsetHeight = layout size, unaffected by the canvas zoom transform.
+      const boxes = nodes.map((node) => {
+        const el = document.querySelector(`.react-flow__node[data-id="${CSS.escape(node.id)}"]`);
+        return { id: node.id, x: node.position.x, y: node.position.y, height: el?.offsetHeight ?? 0 };
+      });
+      if (boxes.some((b) => b.height <= 0) && attempts++ < 10) {
+        requestAnimationFrame(run);
+        return;
+      }
+      persistPositions(repackColumns(boxes.filter((b) => b.height > 0)), { merge: true });
+    };
+    // Let React render the new card size first.
+    requestAnimationFrame(() => requestAnimationFrame(run));
+  }, [requestAutoLayout, rfInstanceRef, persistPositions]);
 
   const fitView = useCallback((padding, delay) => {
     setTimeout(() => rfInstanceRef.current?.fitView({ padding, maxZoom: 1, duration: 350 }), delay);
@@ -272,7 +302,6 @@ export function useCanvasLayout({
       layoutSeededRef.current = true;
       userLayoutRef.current = false;
       // Syncing with newly arrived backend data: first layout for a fresh canvas.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAutoMeasureLayout(true);
       persistPositions(computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, compactDeviceKeys));
       return;
@@ -300,6 +329,7 @@ export function useCanvasLayout({
     autoMeasureLayout,
     layoutEpoch,
     requestAutoLayout,
+    relayoutAfterResize,
     resetLayout,
     alignLayoutByHost,
     saveCurrentHostPreset,

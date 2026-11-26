@@ -66,3 +66,98 @@ export function CompactStackedHandles({
     );
   });
 }
+
+/**
+ * Small round chevron button that minimizes a card to a single line (chevron up) or restores it
+ * (chevron down). Not draggable, so clicking it never starts a node drag.
+ */
+export function CollapseToggle({ collapsed, onToggle }) {
+  const label = collapsed ? 'Expand card' : 'Minimize card';
+  return (
+    <button
+      type="button"
+      className="nodrag nopan ndi-collapse-toggle"
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={`${label} (double-click the header)`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle?.();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"
+        style={{ transform: collapsed ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }}
+      >
+        <path d="M3 7.5 L6 4.5 L9 7.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
+/**
+ * One-line "pill" card: role chip (SENDER / RECEIVER), activity dot and "HOST (Stream)" title.
+ * Keeps one handle per channel (stacked) so existing edges stay attached and new ones can be dropped.
+ * The whole pill drags the node; double-click or the chevron restores the full card.
+ */
+export function MiniNodeCard({
+  role,
+  title,
+  active,
+  scheme,
+  tags = [],
+  warning,
+  channels,
+  connectedChannelIds,
+  handleStyle,
+  getHandleTitle,
+  onExpand,
+}) {
+  const isSender = role === 'sender';
+  return (
+    <div
+      className="node-drag-handle ndi-card-enter ndi-mini-card"
+      title={title}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onExpand?.();
+      }}
+      style={{
+        '--mini-accent': scheme.accent,
+        borderColor: scheme.border,
+        background: `linear-gradient(90deg, ${scheme.from}, ${scheme.to})`,
+      }}
+    >
+      {!isSender && (
+        <CompactStackedHandles
+          channels={channels}
+          prefix="in"
+          handleType="target"
+          position={Position.Left}
+          connectedChannelIds={connectedChannelIds}
+          visibleHandleStyle={handleStyle}
+          getTitle={getHandleTitle}
+        />
+      )}
+      <span className="ndi-mini-dot" data-active={active ? 'true' : 'false'} />
+      <span className="ndi-mini-role">{isSender ? 'SENDER' : 'RECEIVER'}</span>
+      {tags.map((tag) => (
+        <span key={tag} className="ndi-mini-tag">{tag}</span>
+      ))}
+      <span className="ndi-mini-title">{title}</span>
+      {warning ? <span aria-label="Channel warning" title="Channel warning">⚠️</span> : null}
+      <CollapseToggle collapsed onToggle={onExpand} />
+      {isSender && (
+        <CompactStackedHandles
+          channels={channels}
+          prefix="out"
+          handleType="source"
+          position={Position.Right}
+          connectedChannelIds={connectedChannelIds}
+          visibleHandleStyle={handleStyle}
+          getTitle={getHandleTitle}
+        />
+      )}
+    </div>
+  );
+}

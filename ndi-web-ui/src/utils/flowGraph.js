@@ -71,6 +71,7 @@ export function buildCanvasStructureKey({
   showActiveOnly,
   expandedDeviceKeys,
   compactDeviceKeys,
+  minimizedDeviceKeys = new Set(),
 }) {
   const senderPart = filteredSenders
     .map((d) => `${d.deviceKey}:${d.isBridgeHub ? 'hub' : 'dev'}:${(d.channels || []).map((c) => c.channelId).join(',')}`)
@@ -84,7 +85,8 @@ export function buildCanvasStructureKey({
   const hostPart = [...selectedHostKeys].sort().join(',');
   const expandPart = [...expandedDeviceKeys].sort().join(',');
   const compactPart = [...compactDeviceKeys].sort().join(',');
-  return `${senderPart}::${receiverPart}::${connPart}::${hostPart}::${senderFilter}::${receiverFilter}::${showActiveOnly}::${expandPart}::${compactPart}`;
+  const miniPart = [...minimizedDeviceKeys].sort().join(',');
+  return `${senderPart}::${receiverPart}::${connPart}::${hostPart}::${senderFilter}::${receiverFilter}::${showActiveOnly}::${expandPart}::${compactPart}::${miniPart}`;
 }
 
 /** Receiver UUIDs whose optimistic connection now appears in the backend snapshot. */
@@ -128,6 +130,7 @@ export function buildFlowGraph({
   isReceiverSuppressed = () => false,
   expandedDeviceKeys = new Set(),
   compactDeviceKeys = new Set(),
+  minimizedDeviceKeys = new Set(),
   resolvePosition,
   nodeDataCache = new Map(),
   edgeCache = new Map(),
@@ -170,7 +173,8 @@ export function buildFlowGraph({
     const connectedIds = connectedByDeviceKey.get(device.deviceKey) || new Set();
     const logicalCount = logicalConnectionsByDeviceKey.get(device.deviceKey) || 0;
     const compactView = compactDeviceKeys.has(nodeId);
-    const cacheKey = JSON.stringify([device, isCollapsed, compactView, logicalCount, [...connectedIds].sort()]);
+    const minimized = minimizedDeviceKeys.has(nodeId);
+    const cacheKey = JSON.stringify([device, isCollapsed, compactView, minimized, logicalCount, [...connectedIds].sort()]);
     liveNodeIds.add(nodeId);
 
     const cached = nodeDataCache.get(nodeId);
@@ -184,6 +188,7 @@ export function buildFlowGraph({
       connectedChannelIds: connectedIds,
       logicalConnectionCount: logicalCount,
       compactView,
+      minimized,
       ...createNodeCallbacks({ nodeId, device, role }),
     };
     nodeDataCache.set(nodeId, { key: cacheKey, data });
