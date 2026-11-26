@@ -247,14 +247,13 @@ public class TrayApplicationContext : ApplicationContext
         _ = StartWebServerAsync();
     }
 
-    private void OnDiscoverySnapshotUpdated()
+    private void OnDiscoverySnapshotUpdated(NdiSystemStatus status)
     {
         if (_discoveryService == null)
             return;
 
         try
         {
-            var status = _discoveryService.GetSystemStatus();
             UpdateTrayFromStatus(status);
         }
         catch
@@ -280,6 +279,7 @@ public class TrayApplicationContext : ApplicationContext
                 "ok" => $"Status: OK · {status.SenderCount} snd · {status.ReceiverCount} rcv",
                 "idle" => $"Status: waiting for NDI · {status.SenderCount} snd · {status.ReceiverCount} rcv",
                 "degraded" => "Status: partial listener",
+                "stalled" => "Status: discovery stalled",
                 "error" => "Status: listener error",
                 _ => "Status: unknown",
             };
@@ -297,6 +297,7 @@ public class TrayApplicationContext : ApplicationContext
             "ok" => _iconGreen ?? _trayIcon.Icon,
             "idle" => _iconYellow ?? _trayIcon.Icon,
             "degraded" => _iconYellow ?? _trayIcon.Icon,
+            "stalled" => _iconRed ?? _trayIcon.Icon,
             "error" => _iconRed ?? _trayIcon.Icon,
             _ => LoadTrayIcon(),
         };
