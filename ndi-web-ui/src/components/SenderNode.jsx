@@ -13,6 +13,7 @@ import {
   detailedToggleTitleProps,
   nodeDragHandleProps,
   resolveMachineName,
+  formatCardTitle,
 } from './compactNodeHelpers';
 
 const tallyChip = {
@@ -277,18 +278,18 @@ function SenderNode({ data }) {
     const connectedRx = Math.max(ndiConnectedRx, Number(data.logicalConnectionCount) || 0);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
+    // Card title: "HOST (Stream)" — the machine publishing the endpoints, then the stream/application.
+    const streamName = data.applicationId !== 'unknown'
+      ? data.applicationId
+      : (inferredAppName || inferredDeviceName || data.displayName || 'unknown');
+    // Only "HOST (App)" names carry a machine prefix; a bare name is the endpoint itself.
+    const machineName = resolveMachineName(data, inferredAppName ? inferredDeviceName : '', streamName);
     const appDisplayName = isBridgeHub
       ? `NDI Bridge · ${data.hostName || data.displayName || 'Bridge'}`
-      : data.applicationId !== 'unknown'
-        ? data.applicationId
-        : (inferredDeviceName || data.displayName || 'unknown');
+      : formatCardTitle(machineName, streamName);
     const appSubDisplayName = isBridgeHub
       ? `${channels.length} transcoded output${channels.length === 1 ? '' : 's'}`
-      : data.applicationId === 'unknown'
-        ? inferredAppName
-        : '';
-    // Only "HOST (App)" names carry a machine prefix; a bare name is the endpoint itself.
-    const machineName = resolveMachineName(data, inferredAppName ? inferredDeviceName : '', appDisplayName);
+      : '';
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
     const totalDroppedFrames = sumDroppedFrames(channels);
@@ -313,16 +314,10 @@ function SenderNode({ data }) {
             </div>
             <span style={styles.badge(deviceScheme)}>{channels.length} ch</span>
           </div>
-          <div {...compactToggleTitleProps(data?.onToggleCompactView)}>{appDisplayName}</div>
+          <div {...compactToggleTitleProps(data?.onToggleCompactView)} title={appDisplayName}>{appDisplayName}</div>
           {appSubDisplayName ? (
             <div style={{ color: '#cbd5e1', fontSize: '11px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {appSubDisplayName}
-            </div>
-          ) : null}
-          {machineName ? (
-            <div style={compactAddressRowStyle()} title="Machine / device publishing these NDI endpoints">
-              <span style={styles.label}>Host:</span>
-              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
             </div>
           ) : null}
           <div style={compactAddressRowStyle()}>
@@ -446,12 +441,6 @@ function SenderNode({ data }) {
         )}
 
         <div style={styles.infoGrid}>
-          {machineName ? (
-            <div style={styles.infoRow} title="Machine / device publishing these NDI endpoints">
-              <span style={styles.label}>Host:</span>
-              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
-            </div>
-          ) : null}
           <div style={styles.infoRow}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '-'}</span>

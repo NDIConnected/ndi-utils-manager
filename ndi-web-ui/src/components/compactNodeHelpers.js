@@ -131,6 +131,12 @@ export function compactAddressRowStyle() {
   };
 }
 
+/** Card title in NDI naming style: "HOST (Stream)", or just the stream when the host is unknown. */
+export function formatCardTitle(machineName, streamName) {
+  const stream = (streamName || '').trim();
+  return machineName ? `${machineName} (${stream})` : stream;
+}
+
 /**
  * Machine (PC / hardware device) publishing the NDI endpoints: the "HOST" part of "HOST (App)".
  * Prefers the raw prefix of the stream name (keeps spaces/case) over the backend's sanitized hostName.

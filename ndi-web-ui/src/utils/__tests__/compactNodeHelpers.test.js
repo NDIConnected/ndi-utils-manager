@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveMachineName } from '../../components/compactNodeHelpers';
+import { formatCardTitle, resolveMachineName } from '../../components/compactNodeHelpers';
 
 describe('resolveMachineName', () => {
   it('uses the raw "HOST" prefix of the stream name (keeps spaces and case)', () => {
@@ -19,5 +19,16 @@ describe('resolveMachineName', () => {
     expect(resolveMachineName({ hostName: 'unknown' }, '', 'Mic')).toBe('');
     expect(resolveMachineName({ hostName: 'BRIDGE-01', isBridgeHub: true }, 'BRIDGE-01', 'NDI Bridge · BRIDGE-01')).toBe('');
     expect(resolveMachineName({ hostName: 'CAM-1' }, 'CAM-1', 'cam-1')).toBe('');
+  });
+});
+
+describe('formatCardTitle', () => {
+  it('formats "HOST (Stream)" like NDI source names', () => {
+    expect(formatCardTitle('ISE-DEMO', 'Mic')).toBe('ISE-DEMO (Mic)');
+    expect(formatCardTitle('èèè', 'òòòòò')).toBe('èèè (òòòòò)');
+  });
+
+  it('shows just the stream when the host is unknown', () => {
+    expect(formatCardTitle('', 'NDI-Studio-Monitor')).toBe('NDI-Studio-Monitor');
   });
 });

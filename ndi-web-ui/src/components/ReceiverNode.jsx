@@ -13,6 +13,7 @@ import {
   detailedToggleTitleProps,
   nodeDragHandleProps,
   resolveMachineName,
+  formatCardTitle,
 } from './compactNodeHelpers';
 
 const tallyChip = {
@@ -253,12 +254,13 @@ function ReceiverNode({ data }) {
     const streamingChannels = channels.filter((c) => c.isStreaming);
     const firstLabel = channels.find((c) => c?.streamLabel)?.streamLabel || '';
     const { deviceName: inferredDeviceName, appName: inferredAppName } = splitDeviceAndAppNames(firstLabel);
-    const appDisplayName = data.applicationId !== 'unknown'
+    // Card title: "HOST (Stream)" — the machine running the receiver, then the receiver/application.
+    const streamName = data.applicationId !== 'unknown'
       ? data.applicationId
-      : (inferredDeviceName || data.displayName || 'unknown');
-    const appSubDisplayName = data.applicationId === 'unknown' ? inferredAppName : '';
+      : (inferredAppName || inferredDeviceName || data.displayName || 'unknown');
     // Only "HOST (App)" names carry a machine prefix; a bare name is the endpoint itself.
-    const machineName = resolveMachineName(data, inferredAppName ? inferredDeviceName : '', appDisplayName);
+    const machineName = resolveMachineName(data, inferredAppName ? inferredDeviceName : '', streamName);
+    const appDisplayName = formatCardTitle(machineName, streamName);
 
     const deviceTallyPgm = channels.some(channelTallyProgram);
     const deviceTallyPvw = channels.some(channelTallyPreview);
@@ -292,18 +294,7 @@ function ReceiverNode({ data }) {
             </div>
             <span style={styles.badge(hasActivity)}>{channels.length} ch</span>
           </div>
-          <div {...compactToggleTitleProps(data?.onToggleCompactView)}>{appDisplayName}</div>
-          {appSubDisplayName ? (
-            <div style={{ color: '#cbd5e1', fontSize: '11px', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {appSubDisplayName}
-            </div>
-          ) : null}
-          {machineName ? (
-            <div style={compactAddressRowStyle()} title="Machine / device publishing these NDI endpoints">
-              <span style={styles.label}>Host:</span>
-              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
-            </div>
-          ) : null}
+          <div {...compactToggleTitleProps(data?.onToggleCompactView)} title={appDisplayName}>{appDisplayName}</div>
           <div style={compactAddressRowStyle()}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '—'}</span>
@@ -332,9 +323,6 @@ function ReceiverNode({ data }) {
             </div>
           );
         })()}
-        {appSubDisplayName && (
-          <div style={styles.appSubValue}>{appSubDisplayName}</div>
-        )}
 
         {(deviceTallyPgm || deviceTallyPvw) && (
           <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
@@ -369,12 +357,6 @@ function ReceiverNode({ data }) {
         )}
 
         <div style={styles.infoGrid}>
-          {machineName ? (
-            <div style={styles.infoRow} title="Machine / device publishing these NDI endpoints">
-              <span style={styles.label}>Host:</span>
-              <span style={{ ...styles.value, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{machineName}</span>
-            </div>
-          ) : null}
           <div style={styles.infoRow}>
             <span style={styles.label}>Address:</span>
             <span style={styles.value}>{data.address || '-'}</span>
