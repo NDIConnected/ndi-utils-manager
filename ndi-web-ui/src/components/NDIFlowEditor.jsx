@@ -97,6 +97,24 @@ const styles = {
     cursor: 'pointer',
     userSelect: 'none',
   },
+  linkPill: (state) => ({
+    padding: '4px 10px',
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+    border: '1px solid #374151',
+    backgroundColor: '#111827',
+    color: state === 'live' ? '#4ade80' : state === 'offline' ? '#f87171' : '#facc15',
+  }),
+  offlineBanner: {
+    flexShrink: 0,
+    padding: '6px 16px',
+    backgroundColor: '#7f1d1d',
+    color: '#fee2e2',
+    fontSize: 12,
+    borderBottom: '1px solid #991b1b',
+  },
   statusPill: (health) => ({
     padding: '4px 10px',
     borderRadius: 999,
@@ -254,6 +272,9 @@ function sourcesMatch(a, b) {
 }
 
 const OPTIMISTIC_CONNECTION_TTL_MS = 8000;
+const FETCH_TIMEOUT_MS = 5000;
+const FALLBACK_POLL_MS = 2000;
+const LIVE_SAFETY_POLL_MS = 15000;
 
 function isConnectionConfirmed(conn, snapshot) {
   if (conn?.optimistic) return false;
@@ -335,6 +356,11 @@ export default function NDIFlowEditor() {
   const nodePositionsRef = useRef({});
   const canvasStructureKeyRef = useRef('');
   const snapshotDebounceRef = useRef(null);
+  // Ordering: drop any payload older than the newest one accepted (REST polls and pushes race).
+  const lastSnapshotIdRef = useRef({ instanceId: '', sequence: -1 });
+  const hasLoadedRef = useRef(false);
+  const devicesInFlightRef = useRef(false);
+  const [backendOfflineSince, setBackendOfflineSince] = useState(null);
   const [autoMeasureLayout, setAutoMeasureLayout] = useState(() => {
     try {
       if (localStorage.getItem('ndi-multichannel-layout-version') !== NODE_LAYOUT_VERSION) return true;
@@ -434,6 +460,16 @@ export default function NDIFlowEditor() {
 
   const applySnapshotPayload = useCallback((data) => {
     if (!data) return;
+    const instanceId = data.instanceId || '';
+    const sequence = Number(data.sequence);
+    if (instanceId && Number.isFinite(sequence)) {
+      const last = lastSnapshotIdRef.current;
+      // Same backend instance and not newer: stale response, ignore. A new instance (restart) resets ordering.
+      if (last.instanceId === instanceId && sequence <= last.sequence) return;
+      lastSnapshotIdRef.current = { instanceId, sequence };
+    }
+    hasLoadedRef.current = true;
+    setBackendOfflineSince(null);
     if (snapshotDebounceRef.current) {
       clearTimeout(snapshotDebounceRef.current);
     }
@@ -454,7 +490,7 @@ export default function NDIFlowEditor() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_BASE}/status`);
+      const res = await axios.get(`${API_BASE}/status`, { timeout: FETCH_TIMEOUT_MS });
       setSystemStatus(res.data || null);
     } catch {
       // Status is optional; polling continues.
@@ -463,25 +499,40 @@ export default function NDIFlowEditor() {
 
   const fetchDevices = useCallback(async (force = false) => {
     if (!force && Date.now() < mutationBlockUntilRef.current) return;
+    // Background polls never pile up behind a slow backend; forced fetches (after actions) always go.
+    if (!force && devicesInFlightRef.current) return;
 
+    devicesInFlightRef.current = true;
     try {
-      const res = await axios.get(`${API_BASE}/devices`);
+      const res = await axios.get(`${API_BASE}/devices`, { timeout: FETCH_TIMEOUT_MS });
       applySnapshotPayload(res.data);
     } catch (err) {
       console.error('Error fetching aggregated devices:', err);
-      setError('Failed to fetch NDI devices. Make sure the backend is running.');
+      if (hasLoadedRef.current) {
+        // Keep the canvas and last known state; show a banner instead of unmounting everything.
+        setBackendOfflineSince((prev) => prev ?? new Date());
+      } else {
+        setError('Failed to fetch NDI devices. Make sure the backend is running.');
+      }
     } finally {
+      devicesInFlightRef.current = false;
       setLoading(false);
     }
   }, [applySnapshotPayload]);
 
-  useNdiSignalR({
+  const signalRState = useNdiSignalR({
     enabled: true,
     onSnapshot: useCallback((payload) => {
       if (payload?.snapshot) applySnapshotPayload(payload.snapshot);
       if (payload?.status) setSystemStatus(payload.status);
     }, [applySnapshotPayload]),
+    // After (re)connecting, resync immediately instead of waiting for the next push.
+    onReconnected: useCallback(() => {
+      fetchDevices(true);
+      fetchStatus();
+    }, [fetchDevices, fetchStatus]),
   });
+  const pushLive = signalRState === 'live';
 
   const toggleCompactDevice = useCallback((nodeId) => {
     setCompactDeviceKeys((prev) => {
@@ -1235,12 +1286,17 @@ export default function NDIFlowEditor() {
   useEffect(() => {
     fetchDevices(true);
     fetchStatus();
+  }, [fetchDevices, fetchStatus]);
+
+  // Push is the primary channel; polling is a fast fallback only while push is down,
+  // and a slow safety net while it is live (status arrives with every push).
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchDevices(false);
-      fetchStatus();
-    }, 2000);
+      if (!pushLive) fetchStatus();
+    }, pushLive ? LIVE_SAFETY_POLL_MS : FALLBACK_POLL_MS);
     return () => clearInterval(interval);
-  }, [fetchDevices, fetchStatus]);
+  }, [fetchDevices, fetchStatus, pushLive]);
 
   useEffect(() => {
     if (!connectPreview) return undefined;
@@ -1262,6 +1318,25 @@ export default function NDIFlowEditor() {
   }
 
   const health = systemStatus?.health || 'unknown';
+  const linkState = backendOfflineSince
+    ? 'offline'
+    : pushLive
+      ? 'live'
+      : signalRState === 'reconnecting' || signalRState === 'connecting'
+        ? 'reconnecting'
+        : 'polling';
+  const linkLabel = {
+    live: 'Live',
+    reconnecting: 'Reconnecting…',
+    polling: 'Polling',
+    offline: 'Offline',
+  }[linkState];
+  const linkTitle = {
+    live: 'Real-time updates (SignalR) connected',
+    reconnecting: 'Real-time channel reconnecting; polling every 2 s meanwhile',
+    polling: 'Real-time channel unavailable; polling every 2 s',
+    offline: 'Backend unreachable; showing last known state',
+  }[linkState];
   const discoveryLabel = systemStatus
     ? `${systemStatus.sendListenerConnected && systemStatus.recvListenerConnected ? 'Discovery OK' : 'Discovery partial'} · ${systemStatus.senderCount} snd · ${systemStatus.receiverCount} rcv`
     : 'Discovery…';
@@ -1278,6 +1353,9 @@ export default function NDIFlowEditor() {
           </p>
         </div>
         <div style={styles.headerRight}>
+          <span style={styles.linkPill(linkState)} title={linkTitle}>
+            ● {linkLabel}
+          </span>
           <span style={styles.statusPill(health)} title={systemStatus?.discoveryServerUrl || ''}>
             {discoveryLabel}
           </span>
@@ -1346,6 +1424,13 @@ export default function NDIFlowEditor() {
           </button>
         </div>
       </div>
+
+      {backendOfflineSince && (
+        <div style={styles.offlineBanner} role="status">
+          Backend unreachable since {backendOfflineSince.toLocaleTimeString('en-US')} — showing last known state.
+          Reconnecting automatically…
+        </div>
+      )}
 
       <div style={styles.body}>
         {mainTab === 'canvas' && viewMode === 'overview' && (

@@ -40,7 +40,21 @@ public class NDIDiscoveryService : BackgroundService
     private static readonly TimeSpan SenderStaleGrace = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReceiverStaleGrace = TimeSpan.FromSeconds(3);
 
-    public event Action? SnapshotUpdated;
+    /// <summary>Raised after each discovery pass with the freshly computed status (no extra snapshot work for subscribers).</summary>
+    public event Action<NdiSystemStatus>? SnapshotUpdated;
+
+    // Ordering for clients: snapshots carry (InstanceId, Sequence); a restarted backend gets a new InstanceId.
+    private readonly string _instanceId = Guid.NewGuid().ToString("N");
+    private long _snapshotSequence;
+
+    // Event caches / subscriptions are dropped only after an endpoint has been gone for a while,
+    // so short Discovery Server blips do not lose connection state.
+    private readonly ConcurrentDictionary<string, DateTime> _senderUuidLastSeen = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTime> _receiverUuidLastSeen = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan EventCacheRetention = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan DiscoveryStallThreshold = TimeSpan.FromSeconds(10);
+    private bool _prevSendConnected;
+    private bool _prevRecvConnected;
 
     public NDIDiscoveryService(
         ILogger<NDIDiscoveryService> logger,
@@ -122,9 +136,13 @@ public class NDIDiscoveryService : BackgroundService
     /// Single discovery loop: one tick at a time (no overlap), stopped and awaited by the host
     /// before <see cref="Dispose"/> releases the native NDI instances.
     /// </summary>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        // Run on the thread pool: the host is started from the WinForms UI thread, and awaiting there
+        // would capture its SynchronizationContext and run every discovery pass on the tray UI thread.
+        Task.Run(() => RunDiscoveryLoopAsync(stoppingToken), CancellationToken.None);
+
+    private async Task RunDiscoveryLoopAsync(CancellationToken stoppingToken)
     {
-        await Task.Yield();
         _logger.LogInformation("NDI Discovery Service started");
 
         using var timer = new PeriodicTimer(DiscoveryInterval);
@@ -141,10 +159,13 @@ public class NDIDiscoveryService : BackgroundService
                     RetryMissingListeners();
                     updated = DiscoverDevices();
                     RefreshListenerState();
+                    ResubscribeAfterReconnect();
+                    PruneStaleEventCaches();
                 }
 
+                // Awaited (not fire-and-forget) so pushes leave in order, one per pass.
                 if (updated)
-                    PublishSnapshotUpdate();
+                    await PublishSnapshotUpdateAsync();
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
@@ -187,6 +208,60 @@ public class NDIDiscoveryService : BackgroundService
         _recvListenerConnected = _recvListener.IsConnected;
         _sendListenerServerUrl = _sendListener.ServerUrl;
         _recvListenerServerUrl = _recvListener.ServerUrl;
+    }
+
+    /// <summary>
+    /// When a listener reconnects to the Discovery Server, forget local subscription bookkeeping so the
+    /// next get_senders/get_receivers pass subscribes again. Caller must hold <see cref="_ndiLock"/>.
+    /// </summary>
+    private void ResubscribeAfterReconnect()
+    {
+        var send = _sendListenerConnected;
+        var recv = _recvListenerConnected;
+
+        if (send && !_prevSendConnected)
+        {
+            _sendListener.ResetSubscriptions();
+            _logger.LogInformation("SendListener (re)connected to Discovery Server; re-subscribing sender events");
+        }
+
+        if (recv && !_prevRecvConnected)
+        {
+            _recvListener.ResetSubscriptions();
+            _logger.LogInformation("RecvListener (re)connected to Discovery Server; re-subscribing receiver events");
+        }
+
+        _prevSendConnected = send;
+        _prevRecvConnected = recv;
+    }
+
+    /// <summary>
+    /// Drops event caches and subscriptions for endpoints unseen for <see cref="EventCacheRetention"/>,
+    /// so caches do not grow forever and a returning endpoint does not inherit stale state.
+    /// Caller must hold <see cref="_ndiLock"/>.
+    /// </summary>
+    private void PruneStaleEventCaches()
+    {
+        var cutoff = DateTime.UtcNow - EventCacheRetention;
+
+        foreach (var (uuid, lastSeen) in _senderUuidLastSeen)
+        {
+            if (lastSeen >= cutoff)
+                continue;
+            _senderUuidLastSeen.TryRemove(uuid, out _);
+            _senderEventCache.TryRemove(uuid, out _);
+            _sendListener.UnsubscribeEvents(uuid);
+        }
+
+        foreach (var (uuid, lastSeen) in _receiverUuidLastSeen)
+        {
+            if (lastSeen >= cutoff)
+                continue;
+            _receiverUuidLastSeen.TryRemove(uuid, out _);
+            _receiverEventCache.TryRemove(uuid, out _);
+            _receiverSourceNames.TryRemove(uuid, out _);
+            _recvListener.UnsubscribeEvents(uuid);
+        }
     }
 
     /// <summary>One discovery pass. Caller must hold <see cref="_ndiLock"/>. Returns true when the cache was refreshed.</summary>
@@ -267,7 +342,9 @@ public class NDIDiscoveryService : BackgroundService
         var sendConnected = _sendListenerConnected;
         var recvConnected = _recvListenerConnected;
         var health = "ok";
-        if (!sendConnected && !recvConnected)
+        if (DateTime.UtcNow - _lastDiscoveryAt > DiscoveryStallThreshold)
+            health = "stalled";
+        else if (!sendConnected && !recvConnected)
             health = "error";
         else if (!sendConnected || !recvConnected)
             health = "degraded";
@@ -294,12 +371,26 @@ public class NDIDiscoveryService : BackgroundService
         };
     }
 
-    private void PublishSnapshotUpdate()
+    private async Task PublishSnapshotUpdateAsync()
     {
         _lastDiscoveryAt = DateTime.UtcNow;
+
+        NDIAggregatedSnapshot snapshot;
+        NdiSystemStatus status;
         try
         {
-            SnapshotUpdated?.Invoke();
+            snapshot = GetAggregatedSnapshot();
+            status = BuildSystemStatus(snapshot);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to build snapshot");
+            return;
+        }
+
+        try
+        {
+            SnapshotUpdated?.Invoke(status);
         }
         catch (Exception ex)
         {
@@ -309,19 +400,15 @@ public class NDIDiscoveryService : BackgroundService
         if (_hubContext == null)
             return;
 
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                var snapshot = GetAggregatedSnapshot();
-                var status = BuildSystemStatus(snapshot);
-                await _hubContext.Clients.All.SendAsync("snapshotUpdated", new { snapshot, status });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "SignalR snapshot publish failed");
-            }
-        });
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _hubContext.Clients.All.SendAsync("snapshotUpdated", new { snapshot, status }, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "SignalR snapshot publish failed");
+        }
     }
 
     public List<NDISenderInfo> GetSenders()
@@ -336,6 +423,8 @@ public class NDIDiscoveryService : BackgroundService
 
     public NDIAggregatedSnapshot GetAggregatedSnapshot()
     {
+        // Taken before reading state, so a higher sequence never carries older data than a lower one.
+        var sequence = Interlocked.Increment(ref _snapshotSequence);
         var senders = GetSenders();
         var receivers = GetReceivers();
 
@@ -601,6 +690,8 @@ public class NDIDiscoveryService : BackgroundService
 
         return new NDIAggregatedSnapshot
         {
+            InstanceId = _instanceId,
+            Sequence = sequence,
             GeneratedAt = DateTime.UtcNow,
             Senders = senderDevices.Values.OrderBy(d => d.DisplayName).ToList(),
             Receivers = receiverDevices.Values.OrderBy(d => d.DisplayName).ToList(),
@@ -1435,6 +1526,8 @@ public class NDIDiscoveryService : BackgroundService
             sender.LastSeen = now;
             _senders[sender.Name] = sender;
             seen.Add(sender.Name);
+            if (!string.IsNullOrEmpty(sender.Id))
+                _senderUuidLastSeen[sender.Id] = now;
         }
 
         TouchFinderVisibleSenders(seen, now);
@@ -1472,6 +1565,7 @@ public class NDIDiscoveryService : BackgroundService
             receiver.LastSeen = now;
             _receivers[receiver.Id] = receiver;
             seen.Add(receiver.Id);
+            _receiverUuidLastSeen[receiver.Id] = now;
         }
 
         foreach (var key in _receivers.Keys.ToList())

@@ -244,6 +244,16 @@ public class NDISendListener : IDisposable
         return eventList;
     }
 
+    /// <summary>
+    /// Forgets local subscription bookkeeping (no native calls) so the next discovery pass subscribes again,
+    /// e.g. after the Discovery Server connection was lost and restored.
+    /// </summary>
+    public void ResetSubscriptions()
+    {
+        lock (_subscriptionLock)
+            _subscribedSenderUuids.Clear();
+    }
+
     private void TeardownListener()
     {
         if (_listenerInstance == IntPtr.Zero)

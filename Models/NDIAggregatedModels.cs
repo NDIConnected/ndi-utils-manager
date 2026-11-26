@@ -2,6 +2,10 @@ namespace NDIManager.Models;
 
 public class NDIAggregatedSnapshot
 {
+    /// <summary>Changes when the backend restarts; clients reset their ordering state on change.</summary>
+    public string InstanceId { get; set; } = string.Empty;
+    /// <summary>Monotonic per instance; clients drop snapshots older than the last one applied.</summary>
+    public long Sequence { get; set; }
     public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
     public List<NDIMultiDevice> Senders { get; set; } = new();
     public List<NDIMultiDevice> Receivers { get; set; } = new();

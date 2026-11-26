@@ -15,12 +15,24 @@
 - Discovery runs in a single non-overlapping loop inside the hosted service (was a `System.Threading.Timer` that could overlap itself); all native NDI calls are serialized, and shutdown waits for the loop before NDI handles are destroyed — fixes possible crashes on Exit / Restart service / port change.
 - Restart waits for the previous web host to fully stop instead of a fixed 500 ms delay.
 - Content root anchored to the executable folder: the Web UI no longer returns 404 when the app is started from a different working directory.
+- Discovery loop runs on the thread pool (it was running on the tray UI thread because the host is started from WinForms).
+- Snapshot pushes are sent in order (awaited, one per pass) and carry `instanceId` + `sequence` so clients can drop stale data.
+- After a Send/Recv listener reconnects to the Discovery Server, event subscriptions are renewed.
+- Event caches and subscriptions for endpoints unseen for 5 minutes are dropped (no unbounded growth, no stale "connected" state on return).
+- New health state `stalled` (tray icon red) when no discovery pass completed for 10 s.
+- Tray status reuses the computed status instead of building a second snapshot every second.
 
 ### Web UI
 
 - Canvas nodes are no longer deletable: pressing Backspace on a selected device no longer disconnects all of its routes.
 - Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (previous graph is kept only while the backend snapshot is empty).
 - Optimistic connections are drawn as pending (yellow, dashed) until the receiver confirms, expire after 8 s with a warning, and are cleared on every disconnect / failed reconnect path.
+- Out-of-order snapshots (REST polls vs. pushes) are dropped using `instanceId` / `sequence`; edges no longer flicker after a connect.
+- SignalR reconnects forever with capped backoff (was giving up after ~17 s), retries a failed initial start, and resyncs with a full fetch after reconnecting.
+- Connection indicator in the header: **Live / Reconnecting… / Polling / Offline**.
+- Polling is a 2 s fallback only while push is down (15 s safety poll while live); background polls never overlap and time out after 5 s.
+- A backend outage no longer replaces the UI with an error page: the canvas keeps the last known state with an "Backend unreachable since …" banner, and recovers automatically.
+- Vite dev proxy forwards `/hubs` (WebSocket) so SignalR works with `npm run dev`.
 
 ## [Version 3.2.1] - 2026-07
 
