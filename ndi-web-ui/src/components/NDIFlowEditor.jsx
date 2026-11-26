@@ -143,8 +143,8 @@ const styles = {
   },
 };
 
-function mergeNodes(prevNodes, nextNodes, draggingNodeIds) {
-  if (nextNodes.length === 0 && prevNodes.length > 0) {
+function mergeNodes(prevNodes, nextNodes, draggingNodeIds, snapshotIsEmpty) {
+  if (snapshotIsEmpty && nextNodes.length === 0 && prevNodes.length > 0) {
     return prevNodes;
   }
   const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
@@ -159,8 +159,8 @@ function mergeNodes(prevNodes, nextNodes, draggingNodeIds) {
   });
 }
 
-function mergeEdges(prevEdges, nextEdges) {
-  if (nextEdges.length === 0 && prevEdges.length > 0) {
+function mergeEdges(prevEdges, nextEdges, snapshotIsEmpty) {
+  if (snapshotIsEmpty && nextEdges.length === 0 && prevEdges.length > 0) {
     return prevEdges;
   }
   const prevMap = new Map(prevEdges.map((e) => [e.id, e]));
@@ -253,8 +253,10 @@ function sourcesMatch(a, b) {
   return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
+const OPTIMISTIC_CONNECTION_TTL_MS = 8000;
+
 function isConnectionConfirmed(conn, snapshot) {
-  if (conn?.optimistic) return true;
+  if (conn?.optimistic) return false;
   const receiverDevice = snapshot.receivers.find((d) => d.deviceKey === conn.receiverDeviceKey);
   const channel = receiverDevice?.channels?.find((c) => c.channelId === conn.receiverChannelId);
   if (!channel) return false;
@@ -284,6 +286,7 @@ function buildOptimisticConnection(details) {
     receiverUuid,
     sourceName,
     optimistic: true,
+    createdAt: Date.now(),
   };
 }
 
@@ -412,7 +415,15 @@ export default function NDIFlowEditor() {
     if (!conn) return;
     optimisticConnectionsRef.current.set(conn.receiverUuid, conn);
     setPendingEpoch((e) => e + 1);
-  }, []);
+    // Expire if the receiver never reports the new source (offline device, unresolved name, ...).
+    setTimeout(() => {
+      const current = optimisticConnectionsRef.current.get(conn.receiverUuid);
+      if (current !== conn) return; // confirmed, cleared or superseded meanwhile
+      optimisticConnectionsRef.current.delete(conn.receiverUuid);
+      setPendingEpoch((e) => e + 1);
+      toast(`Connection not confirmed by receiver: ${conn.receiverLabel || conn.receiverUuid} → ${conn.sourceName}`, 'warning');
+    }, OPTIMISTIC_CONNECTION_TTL_MS);
+  }, [toast]);
 
   const clearOptimisticConnection = useCallback((receiverUuid) => {
     if (!receiverUuid) return;
@@ -698,6 +709,7 @@ export default function NDIFlowEditor() {
       return;
     }
     if (!window.confirm(`Disconnect ${uuids.length} receivers on ${singleHostKey}?`)) return;
+    uuids.forEach((uuid) => clearOptimisticConnection(uuid));
 
     blockPollingDuringMutation(5000);
     try {
@@ -709,11 +721,12 @@ export default function NDIFlowEditor() {
     } finally {
       setTimeout(() => fetchDevices(true), 800);
     }
-  }, [singleHostKey, snapshot.receivers, blockPollingDuringMutation, fetchDevices, toast]);
+  }, [singleHostKey, snapshot.receivers, blockPollingDuringMutation, clearOptimisticConnection, fetchDevices, toast]);
 
   const disconnectReceiver = useCallback(async (receiverUuid) => {
     if (!receiverUuid) return;
     blockPollingDuringMutation();
+    clearOptimisticConnection(receiverUuid);
     suppressReceiverConnection(receiverUuid);
     try {
       const response = await axios.post(`${API_BASE}/disconnect`, { receiverUuid });
@@ -727,7 +740,7 @@ export default function NDIFlowEditor() {
     } finally {
       setTimeout(() => fetchDevices(true), 800);
     }
-  }, [blockPollingDuringMutation, suppressReceiverConnection, fetchDevices, toast]);
+  }, [blockPollingDuringMutation, clearOptimisticConnection, suppressReceiverConnection, fetchDevices, toast]);
 
   const handleMeasuredLayout = useCallback((positions) => {
     if (userLayoutRef.current) {
@@ -917,11 +930,13 @@ export default function NDIFlowEditor() {
       }
       const connectResponse = await axios.post(`${API_BASE}/connect`, { receiverUuid: newReceiverUuid, sourceName });
       if (!connectResponse?.data?.success) {
+        clearOptimisticConnection(newReceiverUuid);
         toast(`Reconnect failed: ${connectResponse?.data?.message ?? 'error'}`, 'error');
       } else {
         toast(`Reconnect → ${sourceName}`, 'success');
       }
     } catch {
+      clearOptimisticConnection(newReceiverUuid);
       toast('Reconnect error', 'error');
     } finally {
       setTimeout(() => fetchDevices(true), 800);
@@ -1084,6 +1099,7 @@ export default function NDIFlowEditor() {
         id: nodeId,
         type: 'senderNode',
         dragHandle: '.node-drag-handle',
+        deletable: false,
         position: resolveNodePosition(nodeId, undefined),
         data: buildNodeData(device, 'sender'),
       };
@@ -1095,12 +1111,14 @@ export default function NDIFlowEditor() {
         id: nodeId,
         type: 'receiverNode',
         dragHandle: '.node-drag-handle',
+        deletable: false,
         position: resolveNodePosition(nodeId, undefined),
         data: buildNodeData(device, 'receiver'),
       };
     });
 
     const nextNodes = [...senderNodes, ...receiverNodes];
+    const snapshotIsEmpty = snapshot.senders.length === 0 && snapshot.receivers.length === 0;
     const structureKey = buildCanvasStructureKey({
       filteredSenders,
       filteredReceivers,
@@ -1187,13 +1205,13 @@ export default function NDIFlowEditor() {
           };
         });
       });
-      setEdges((prev) => mergeEdges(prev, nextEdges));
+      setEdges((prev) => mergeEdges(prev, nextEdges, snapshotIsEmpty));
       if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
       return;
     }
 
-    setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current));
-    setEdges((prev) => mergeEdges(prev, nextEdges));
+    setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current, snapshotIsEmpty));
+    setEdges((prev) => mergeEdges(prev, nextEdges, snapshotIsEmpty));
     if (isFirstLoad && nextNodes.length > 0) setIsFirstLoad(false);
   }, [
     snapshot,

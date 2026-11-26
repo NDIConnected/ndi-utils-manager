@@ -263,7 +263,7 @@ internal static class BridgeRouting
     }
 
     private static string SanitizeKeyPart(string value) =>
-        Regex.Replace(value.Trim(), @"[^A-Za-z0-9_.-]+", "-");
+        Regex.Replace(value.Trim(), @"[^\p{L}\p{M}\p{N}_.-]+", "-");
 
     private static string ExtractHostPrefixFromStreamName(string? streamLabel)
     {

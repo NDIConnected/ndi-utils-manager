@@ -15,6 +15,7 @@ public class TrayApplicationContext : ApplicationContext
 
     private WebApplication? _webApp;
     private CancellationTokenSource? _cts;
+    private Task? _runTask;
     private int _currentPort;
     private bool _serverRunning;
 
@@ -109,7 +110,13 @@ public class TrayApplicationContext : ApplicationContext
         {
             _cts = new CancellationTokenSource();
 
-            var builder = WebApplication.CreateBuilder(_args);
+            // Anchor content root (wwwroot, appsettings.json) to the exe folder, not the current
+            // working directory: shortcuts/scripts may start the app from anywhere.
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = _args,
+                ContentRootPath = AppContext.BaseDirectory,
+            });
 
             // Services
             builder.Services.AddControllers();
@@ -165,7 +172,8 @@ public class TrayApplicationContext : ApplicationContext
                 $"Running on http://localhost:{_currentPort}",
                 ToolTipIcon.Info);
 
-            await _webApp.RunAsync(_cts.Token);
+            _runTask = _webApp.RunAsync(_cts.Token);
+            await _runTask;
         }
         catch (OperationCanceledException)
         {
@@ -185,11 +193,25 @@ public class TrayApplicationContext : ApplicationContext
     private async Task StopWebServerAsync()
     {
         if (_cts != null)
-        {
             await _cts.CancelAsync();
-            _cts.Dispose();
-            _cts = null;
+
+        // Wait for the host to finish stopping (discovery loop ended, NDI released, port freed)
+        // before disposing or starting a new instance.
+        if (_runTask != null)
+        {
+            try
+            {
+                await _runTask;
+            }
+            catch
+            {
+                // Errors are reported by StartWebServerAsync.
+            }
+            _runTask = null;
         }
+
+        _cts?.Dispose();
+        _cts = null;
 
         if (_discoveryService != null)
         {
@@ -221,7 +243,6 @@ public class TrayApplicationContext : ApplicationContext
             ToolTipIcon.Info);
 
         await StopWebServerAsync();
-        await Task.Delay(500);
 
         _ = StartWebServerAsync();
     }

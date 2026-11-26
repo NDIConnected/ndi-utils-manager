@@ -22,7 +22,17 @@ public class NDIDiscoveryService : BackgroundService
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _receiverEventCache;  // Cache of receiver UUID -> event data
     private readonly ILogger<NDIDiscoveryService> _logger;
     private readonly IHubContext<NdiHub>? _hubContext;
-    private readonly System.Threading.Timer _discoveryTimer;
+    // Serializes every native NDI call (discovery loop, connect/disconnect commands, teardown).
+    private readonly object _ndiLock = new();
+    private bool _disposed;
+    private volatile bool _sendListenerConnected;
+    private volatile bool _recvListenerConnected;
+    private volatile string? _sendListenerServerUrl;
+    private volatile string? _recvListenerServerUrl;
+    private readonly string _ndiSdkVersion;
+    private DateTime _lastListenerRetryAt = DateTime.MinValue;
+    private static readonly TimeSpan DiscoveryInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ListenerRetryInterval = TimeSpan.FromSeconds(10);
     private IntPtr _finderInstance = IntPtr.Zero;
     private readonly string? _discoveryServerUrl;
     private readonly HashSet<string> _bridgeHosts;
@@ -52,7 +62,8 @@ public class NDIDiscoveryService : BackgroundService
             throw new Exception("Failed to initialize NDI library");
         }
 
-        _logger.LogInformation("NDI SDK initialized successfully");
+        _ndiSdkVersion = NdiStringUtil.PtrToUtf8String(NDI.NDIlib_version());
+        _logger.LogInformation("NDI SDK initialized successfully (runtime {Version})", _ndiSdkVersion);
 
         var sendLogger = loggerFactory.CreateLogger<NDISendListener>();
         var recvLogger = loggerFactory.CreateLogger<NDIRecvListener>();
@@ -104,21 +115,82 @@ public class NDIDiscoveryService : BackgroundService
             _logger.LogInformation("NDI Finder initialized successfully");
         }
 
-        // Timer for periodic discovery (every 2 seconds)
-        _discoveryTimer = new System.Threading.Timer(DiscoverDevices, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+        RefreshListenerState();
     }
 
+    /// <summary>
+    /// Single discovery loop: one tick at a time (no overlap), stopped and awaited by the host
+    /// before <see cref="Dispose"/> releases the native NDI instances.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await Task.Yield();
         _logger.LogInformation("NDI Discovery Service started");
 
-        while (!stoppingToken.IsCancellationRequested)
+        using var timer = new PeriodicTimer(DiscoveryInterval);
+        try
         {
-            await Task.Delay(1000, stoppingToken);
+            do
+            {
+                bool updated;
+                lock (_ndiLock)
+                {
+                    if (_disposed)
+                        break;
+
+                    RetryMissingListeners();
+                    updated = DiscoverDevices();
+                    RefreshListenerState();
+                }
+
+                if (updated)
+                    PublishSnapshotUpdate();
+            }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown.
+        }
+
+        _logger.LogInformation("NDI Discovery Service stopped");
     }
 
-    private void DiscoverDevices(object? state)
+    /// <summary>
+    /// Listener create returns NULL while no Discovery Server is reachable (SDK 6.4 docs); retry periodically.
+    /// Caller must hold <see cref="_ndiLock"/>.
+    /// </summary>
+    private void RetryMissingListeners()
+    {
+        if (_sendListener.IsCreated && _recvListener.IsCreated)
+            return;
+
+        var now = DateTime.UtcNow;
+        if (now - _lastListenerRetryAt < ListenerRetryInterval)
+            return;
+        _lastListenerRetryAt = now;
+
+        if (!_sendListener.IsCreated && _sendListener.Initialize(_discoveryServerUrl))
+            _logger.LogInformation("NDISendListener created on retry");
+
+        if (!_recvListener.IsCreated && _recvListener.Initialize(_discoveryServerUrl))
+            _logger.LogInformation("NDIRecvListener created on retry");
+    }
+
+    /// <summary>
+    /// Caches listener state so status readers never touch native handles.
+    /// Caller must hold <see cref="_ndiLock"/> (or be in the constructor).
+    /// </summary>
+    private void RefreshListenerState()
+    {
+        _sendListenerConnected = _sendListener.IsConnected;
+        _recvListenerConnected = _recvListener.IsConnected;
+        _sendListenerServerUrl = _sendListener.ServerUrl;
+        _recvListenerServerUrl = _recvListener.ServerUrl;
+    }
+
+    /// <summary>One discovery pass. Caller must hold <see cref="_ndiLock"/>. Returns true when the cache was refreshed.</summary>
+    private bool DiscoverDevices()
     {
         try
         {
@@ -160,11 +232,12 @@ public class NDIDiscoveryService : BackgroundService
                     _senders.Values.Count(s => !s.IsLegacyDiscovery));
             }
 
-            PublishSnapshotUpdate();
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during NDI discovery");
+            return false;
         }
     }
 
@@ -191,10 +264,12 @@ public class NDIDiscoveryService : BackgroundService
     private NdiSystemStatus BuildSystemStatus(NDIAggregatedSnapshot snapshot)
     {
         var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.1.0";
+        var sendConnected = _sendListenerConnected;
+        var recvConnected = _recvListenerConnected;
         var health = "ok";
-        if (!_sendListener.IsConnected && !_recvListener.IsConnected)
+        if (!sendConnected && !recvConnected)
             health = "error";
-        else if (!_sendListener.IsConnected || !_recvListener.IsConnected)
+        else if (!sendConnected || !recvConnected)
             health = "degraded";
         else if (snapshot.Senders.Count + snapshot.Receivers.Count == 0)
             health = "idle";
@@ -202,12 +277,13 @@ public class NDIDiscoveryService : BackgroundService
         return new NdiSystemStatus
         {
             AppVersion = version,
+            NdiSdkVersion = _ndiSdkVersion,
             ServerTime = DateTime.UtcNow,
             DiscoveryServerUrl = _discoveryServerUrl ?? "(SDK default)",
-            SendListenerConnected = _sendListener.IsConnected,
-            RecvListenerConnected = _recvListener.IsConnected,
-            SendListenerServerUrl = _sendListener.ServerUrl,
-            RecvListenerServerUrl = _recvListener.ServerUrl,
+            SendListenerConnected = sendConnected,
+            RecvListenerConnected = recvConnected,
+            SendListenerServerUrl = _sendListenerServerUrl,
+            RecvListenerServerUrl = _recvListenerServerUrl,
             FinderAvailable = _finderInstance != IntPtr.Zero,
             SenderCount = snapshot.Senders.Count,
             LegacySenderCount = snapshot.Senders.Count(d => d.IsLegacyDiscovery),
@@ -580,7 +656,7 @@ public class NDIDiscoveryService : BackgroundService
 
         if (appId == "unknown" && !string.IsNullOrWhiteSpace(fallbackName))
         {
-            var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([A-Za-z0-9_.-]+)", RegexOptions.IgnoreCase);
+            var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([\p{L}\p{M}\p{N}_.-]+)", RegexOptions.IgnoreCase);
             if (appMatch.Success)
                 appId = appMatch.Groups[1].Value;
         }
@@ -692,8 +768,9 @@ public class NDIDiscoveryService : BackgroundService
         if (string.IsNullOrWhiteSpace(value))
             return fallback;
 
-        var cleaned = Regex.Replace(value.Trim(), @"[^A-Za-z0-9_.-]+", "-");
-        if (string.IsNullOrWhiteSpace(cleaned))
+        // Keep Unicode letters/digits (accented and non-Latin NDI names), collapse everything else to '-'.
+        var cleaned = Regex.Replace(value.Trim(), @"[^\p{L}\p{M}\p{N}_.-]+", "-");
+        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Trim('-').Length == 0)
             return fallback;
 
         // Treat placeholder tokens as missing identity values.
@@ -716,7 +793,7 @@ public class NDIDiscoveryService : BackgroundService
 
         var tokenMatch = Regex.Match(
             source,
-            $@"(?:^|[\[\s;]){Regex.Escape(key)}\s*=\s*([A-Za-z0-9_.-]+)",
+            $@"(?:^|[\[\s;]){Regex.Escape(key)}\s*=\s*([\p{{L}}\p{{M}}\p{{N}}_.-]+)",
             RegexOptions.IgnoreCase);
 
         if (!tokenMatch.Success)
@@ -1262,13 +1339,19 @@ public class NDIDiscoveryService : BackgroundService
     {
         try
         {
-            bool success = _recvListener.SendConnectCommand(receiverUuid, sourceName);
+            bool success;
+            lock (_ndiLock)
+            {
+                if (_disposed)
+                    return false;
+                success = _recvListener.SendConnectCommand(receiverUuid, sourceName);
+            }
 
             if (success)
             {
                 var trimmed = sourceName.Trim();
                 _receiverSourceNames[receiverUuid] = trimmed;
-                var eventData = _receiverEventCache.GetOrAdd(receiverUuid, _ => new Dictionary<string, string>());
+                var eventData = _receiverEventCache.GetOrAdd(receiverUuid, _ => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
                 lock (eventData)
                 {
                     eventData["source-name"] = trimmed;
@@ -1295,7 +1378,13 @@ public class NDIDiscoveryService : BackgroundService
     {
         try
         {
-            bool success = _recvListener.SendDisconnectCommand(receiverUuid);
+            bool success;
+            lock (_ndiLock)
+            {
+                if (_disposed)
+                    return false;
+                success = _recvListener.SendDisconnectCommand(receiverUuid);
+            }
 
             if (success)
             {
@@ -1454,7 +1543,6 @@ public class NDIDiscoveryService : BackgroundService
         if (_finderInstance == IntPtr.Zero)
             return 0;
 
-        NDI.NDIlib_find_wait_for_sources(_finderInstance, 250);
 
         var added = 0;
         var finderCount = 0;
@@ -1536,21 +1624,29 @@ public class NDIDiscoveryService : BackgroundService
 
     public override void Dispose()
     {
-        _discoveryTimer?.Dispose();
-
-        _receivers.Clear();
-
-        _sendListener?.Dispose();
-        _recvListener?.Dispose();
-
-        if (_finderInstance != IntPtr.Zero)
+        // The host awaits ExecuteAsync during StopAsync; the lock also waits for any in-flight
+        // connect/disconnect command before native instances are released.
+        lock (_ndiLock)
         {
-            NDI.NDIlib_find_destroy(_finderInstance);
-            _finderInstance = IntPtr.Zero;
+            if (_disposed)
+                return;
+            _disposed = true;
+
+            _receivers.Clear();
+
+            _sendListener?.Dispose();
+            _recvListener?.Dispose();
+
+            if (_finderInstance != IntPtr.Zero)
+            {
+                NDI.NDIlib_find_destroy(_finderInstance);
+                _finderInstance = IntPtr.Zero;
+            }
+
+            NDI.NDIlib_destroy();
         }
 
-        NDI.NDIlib_destroy();
-
         base.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

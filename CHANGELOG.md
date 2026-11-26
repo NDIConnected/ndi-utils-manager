@@ -1,5 +1,27 @@
 # NDI Manager - Changelog
 
+## [Unreleased]
+
+### NDI SDK
+
+- Built and tested against **NDI SDK 6.4.0** (runtime `6.4.0.2`); runtime version now logged at startup and exposed as `ndiSdkVersion` in `/api/ndi/status`.
+- P/Invoke string parameters (`send_connect`, `subscribe_events`, `unsubscribe_events`) marshalled as **UTF-8** instead of ANSI: sources/receivers with non-ASCII names (e.g. `Città`) now connect correctly.
+- Device/host identity parsing keeps Unicode letters: senders like `èèè (òòòòò)` were shown as `-` (name collapsed by an ASCII-only sanitizer).
+- Added 6.4 `recv_bandwidth` values (`video_only_lowest`, `video_only_highest`) and `NDIlib_version()` binding.
+- Send/Recv listeners are re-created every 10 s when no Discovery Server was reachable at startup (SDK create returns NULL in that case).
+
+### Reliability
+
+- Discovery runs in a single non-overlapping loop inside the hosted service (was a `System.Threading.Timer` that could overlap itself); all native NDI calls are serialized, and shutdown waits for the loop before NDI handles are destroyed — fixes possible crashes on Exit / Restart service / port change.
+- Restart waits for the previous web host to fully stop instead of a fixed 500 ms delay.
+- Content root anchored to the executable folder: the Web UI no longer returns 404 when the app is started from a different working directory.
+
+### Web UI
+
+- Canvas nodes are no longer deletable: pressing Backspace on a selected device no longer disconnects all of its routes.
+- Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (previous graph is kept only while the backend snapshot is empty).
+- Optimistic connections are drawn as pending (yellow, dashed) until the receiver confirms, expire after 8 s with a warning, and are cleared on every disconnect / failed reconnect path.
+
 ## [Version 3.2.1] - 2026-07
 
 ### Docs / licensing
