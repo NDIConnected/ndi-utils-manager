@@ -39,7 +39,7 @@ See [README.md](README.md) for full details.
 
 1. Fork the repository and create a feature branch from `main`.
 2. Keep changes focused — one logical change per PR.
-3. Ensure `dotnet build NDIManager.csproj -c Release` succeeds. If you changed `ndi-web-ui/`, also run `npm run lint`, `npm test` and `npm run build` there (all must pass).
+3. Ensure `dotnet build NDIManager.csproj -c Release` succeeds. If you changed `ndi-web-ui/`, also run `npm run lint`, `npm test` and `npm run build` there (all must pass). The **CI** workflow (`.github/workflows/ci.yml`) runs the same checks on every pull request; the .NET build fails on any warning except the missing NDI runtime (`NDIMGR001`, the SDK is not installed on CI runners).
 4. Update [CHANGELOG.md](CHANGELOG.md) for user-visible changes.
 5. Open a PR against `NDIConnected/ndi-utils-manager` with a clear description and test notes.
 

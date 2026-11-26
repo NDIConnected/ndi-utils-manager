@@ -1,5 +1,7 @@
 # NDI Manager
 
+[![CI](https://github.com/NDIConnected/ndi-utils-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/NDIConnected/ndi-utils-manager/actions/workflows/ci.yml)
+
 > **Sample / reference software.** NDI Manager is an MIT-licensed community sample, **not officially supported** as a production product. The Web UI / API and NDI routing controls are intended for **trusted local networks**. See [SECURITY.md](SECURITY.md) before deploying on shared networks.
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
