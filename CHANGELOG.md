@@ -48,6 +48,8 @@
 - **Unit tests** with Vitest (`npm test`, 43 tests) for filters, graph building, optimistic connections, snapshot ordering, routing helpers and layout.
 - `npm run lint` is clean (0 problems): removed dead code and moved non-component exports out of component files (Fast Refresh).
 - Canvas `fitView` is queued once at mount instead of being toggled by a first-load flag.
+- **CI** (GitHub Actions): Web UI lint + tests + build on Ubuntu, .NET Release build on Windows (warnings as errors), on every PR and push to `main`.
+- NDI SDK location is configurable (`-p:NdiSdkDir=...` or `NDI_SDK_DIR`); the build no longer fails when the SDK is absent (warning `NDIMGR001`), while `dotnet publish` still refuses to produce a release without the NDI runtime.
 
 ## [Version 3.2.1] - 2026-07
 

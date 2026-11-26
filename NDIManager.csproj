@@ -40,18 +40,30 @@
     <Content Remove="ThirdPartyLicenses\**" />
   </ItemGroup>
 
+  <!-- NDI runtime DLL from the installed NDI 6 SDK (override with -p:NdiSdkDir=... or the NDI_SDK_DIR env var).
+       Optional at build time so CI can compile without the SDK; required to run and to publish. -->
+  <PropertyGroup>
+    <NdiSdkDir Condition="'$(NdiSdkDir)' == '' and '$(NDI_SDK_DIR)' != ''">$(NDI_SDK_DIR)</NdiSdkDir>
+    <NdiSdkDir Condition="'$(NdiSdkDir)' == ''">C:\Program Files\NDI\NDI 6 SDK</NdiSdkDir>
+    <NdiRuntimeDll>$(NdiSdkDir)\Bin\x64\Processing.NDI.Lib.x64.dll</NdiRuntimeDll>
+  </PropertyGroup>
+
   <!-- Copy NDI DLL to build output -->
-  <ItemGroup>
-    <None Include="C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll">
+  <ItemGroup Condition="Exists('$(NdiRuntimeDll)')">
+    <None Include="$(NdiRuntimeDll)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Processing.NDI.Lib.x64.dll</Link>
     </None>
   </ItemGroup>
 
-  <!-- Ensure NDI DLL is also in publish output -->
+  <Target Name="WarnMissingNdiRuntime" BeforeTargets="Build" Condition="!Exists('$(NdiRuntimeDll)')">
+    <Warning Code="NDIMGR001" Text="NDI runtime not found at '$(NdiRuntimeDll)'. The app builds but will not run without Processing.NDI.Lib.x64.dll (install the NDI 6 SDK or set NdiSdkDir)." />
+  </Target>
+
+  <!-- Ensure NDI DLL is also in publish output (a release without it would not start) -->
   <Target Name="CopyNdiDllToPublish" AfterTargets="Publish">
-    <Copy SourceFiles="C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll"
-          DestinationFolder="$(PublishDir)" />
+    <Error Condition="!Exists('$(NdiRuntimeDll)')" Text="NDI runtime not found at '$(NdiRuntimeDll)'; cannot publish without it." />
+    <Copy SourceFiles="$(NdiRuntimeDll)" DestinationFolder="$(PublishDir)" />
   </Target>
 
   <!-- Ensure wwwroot is copied to output directory -->

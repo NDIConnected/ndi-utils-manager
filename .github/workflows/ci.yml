@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-ui:
+    name: Web UI (lint, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ndi-web-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ndi-web-ui/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    name: Backend (.NET build)
+    # net9.0-windows (WinForms tray app) builds on Windows only.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # The NDI SDK is not installed on the runner: the build warns (NDIMGR001) that the runtime DLL is
+      # missing — needed to run/publish, not to compile. Every other warning fails the build.
+      - name: Build
+        run: dotnet build NDIManager.csproj -c Release -warnaserror -warnnotaserror:NDIMGR001
