@@ -26,7 +26,7 @@
 
 ### Web UI
 
-- Sender and receiver cards show the **Host** (machine / device publishing the NDI endpoints, e.g. `ISE-DEMO` for `ISE-DEMO (Mic)`) above the address, in both detailed and compact views.
+- Sender and receiver card titles use NDI naming, **`HOST (Stream)`** (e.g. `ISE-DEMO (Mic)`, `LENOVO-02 (NDI-Studio-Monitor)`), so the machine publishing the endpoints is always visible; just the stream name when the host is unknown. Bridge hubs keep `NDI Bridge · <host>`.
 - Canvas nodes are no longer deletable: pressing Backspace on a selected device no longer disconnects all of its routes.
 - Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (previous graph is kept only while the backend snapshot is empty).
 - Optimistic connections are drawn as pending (yellow, dashed) until the receiver confirms, expire after 8 s with a warning, and are cleared on every disconnect / failed reconnect path.
