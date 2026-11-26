@@ -192,7 +192,7 @@ public class NDIRecvListener : IDisposable
             }
         }
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "[NDI RecvListener] get_receivers: count={Count}, p_name[]=[{Names}]",
             numReceivers,
             string.Join(" | ", namesForLog));
@@ -279,7 +279,7 @@ public class NDIRecvListener : IDisposable
                 string name = NdiStringUtil.PtrToUtf8String(evt.p_name);
                 string value = NdiStringUtil.PtrToUtf8String(evt.p_value);
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "[NDI RecvListener] event: receiver_uuid={Uuid}, p_name={EventName}, p_value={EventValue}",
                     uuid,
                     name,

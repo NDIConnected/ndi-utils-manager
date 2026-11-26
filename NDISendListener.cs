@@ -151,7 +151,7 @@ public class NDISendListener : IDisposable
             EnsureSubscribedToSenderEvents(uuid);
         }
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "[NDI SendListener] get_senders: count={Count}, p_name[]=[{Names}]",
             numSenders,
             string.Join(" | ", namesForLog));
@@ -222,7 +222,7 @@ public class NDISendListener : IDisposable
                 string name = NdiStringUtil.PtrToUtf8String(evt.p_name);
                 string value = NdiStringUtil.PtrToUtf8String(evt.p_value);
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "[NDI SendListener] event: sender_uuid={Uuid}, p_name={EventName}, p_value={EventValue}",
                     uuid,
                     name,

@@ -21,6 +21,8 @@
 - Event caches and subscriptions for endpoints unseen for 5 minutes are dropped (no unbounded growth, no stale "connected" state on return).
 - New health state `stalled` (tray icon red) when no discovery pass completed for 10 s.
 - Tray status reuses the computed status instead of building a second snapshot every second.
+- Identical snapshots are no longer pushed every second (content fingerprint + 10 s heartbeat).
+- **File logging** to `%LocalAppData%\NDIManager\logs` (daily files, 7 kept); receiver routing changes logged at Information, per-second listener traces moved to Debug.
 
 ### Web UI
 
@@ -33,6 +35,11 @@
 - Polling is a 2 s fallback only while push is down (15 s safety poll while live); background polls never overlap and time out after 5 s.
 - A backend outage no longer replaces the UI with an error page: the canvas keeps the last known state with an "Backend unreachable since …" banner, and recovers automatically.
 - Vite dev proxy forwards `/hubs` (WebSocket) so SignalR works with `npm run dev`.
+- Canvas performance: unchanged devices/edges keep the same objects across snapshots, node components are memoized, React Flow measurements are preserved (no hide/re-measure flicker on connect, filter or expand), and node keyframes moved to CSS.
+- Collapsed devices keep (invisible) handles for connected channels that are not listed, so all their edges are drawn.
+- Reset layout, Load preset and auto layout move nodes immediately (not on the next snapshot).
+- Align by host with a host filter keeps the other hosts' positions; host presets restore only that host's nodes.
+- Newly discovered devices are placed below existing ones (including saved slots of offline devices) instead of overlapping them.
 
 ## [Version 3.2.1] - 2026-07
 

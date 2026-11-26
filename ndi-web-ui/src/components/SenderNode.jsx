@@ -1,9 +1,11 @@
+import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../utils/deviceGrouping';
 import { formatCount, channelStat } from '../utils/formatStats';
 import { channelHealthWarning, sumDroppedFrames } from '../utils/channelHealth';
 import SenderStatsSections from './SenderStatsSections';
 import {
+  HiddenChannelHandles,
   CompactStackedHandles,
   compactCardStyle,
   compactHeaderStyle,
@@ -209,7 +211,7 @@ const styles = {
   }),
 };
 
-export default function SenderNode({ data }) {
+function SenderNode({ data }) {
   const getChannelDisplayLabel = (label, fallback) => {
     const raw = (label || fallback || '').trim();
     const withoutBracketMetadata = raw.replace(/\s*\[.*$/, '').trim();
@@ -349,12 +351,6 @@ export default function SenderNode({ data }) {
 
     return (
       <div style={styles.node(deviceScheme)}>
-        <style>{`
-          @keyframes tallyPulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.55; }
-          }
-        `}</style>
         <div {...nodeDragHandleProps(styles.header)}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(deviceScheme, !isLegacy)} />
@@ -617,6 +613,17 @@ export default function SenderNode({ data }) {
         )}
 
         {isCollapsed && hiddenChannelCount > 0 && (
+          <div style={{ position: 'relative' }}>
+          {/* Connected channels that are not listed still need a handle, or their edges are not drawn. */}
+          <HiddenChannelHandles
+            channels={channels}
+            visibleChannels={visibleChannels}
+            connectedChannelIds={connectedChannelIds}
+            prefix="out"
+            handleType="source"
+            position={Position.Right}
+            handleStyle={styles.channelHandle(deviceScheme)}
+          />
           <button
             type="button"
             className="nodrag nopan"
@@ -637,6 +644,7 @@ export default function SenderNode({ data }) {
           >
             +{hiddenChannelCount} channels — expand
           </button>
+          </div>
         )}
 
         {!isCollapsed && channels.length > COLLAPSE_CHANNELS_THRESHOLD && (
@@ -714,16 +722,6 @@ export default function SenderNode({ data }) {
 
   return (
     <div style={styles.node(colorScheme)}>
-      <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: .5;
-          }
-        }
-      `}</style>
 
       {/* Tally Bar */}
       {(tallyOnProgram || tallyOnPreview) && (
@@ -885,3 +883,6 @@ export default function SenderNode({ data }) {
     </div>
   );
 }
+
+// Re-render only when React Flow passes new props (node data is kept stable when unchanged).
+export default memo(SenderNode);

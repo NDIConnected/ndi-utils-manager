@@ -168,13 +168,18 @@ function mergeNodes(prevNodes, nextNodes, draggingNodeIds, snapshotIsEmpty) {
   const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
   return nextNodes.map((node) => {
     const prev = prevMap.get(node.id);
-    const keepDragPosition = prev?.position && draggingNodeIds.has(node.id);
-    return {
-      ...node,
-      position: keepDragPosition ? prev.position : node.position,
-      selected: prev?.selected ?? false,
-    };
+    if (!prev) return { ...node, selected: false };
+    const keepDragPosition = prev.position && draggingNodeIds.has(node.id);
+    const position = keepDragPosition ? prev.position : node.position;
+    // Unchanged node: reuse the previous object so React Flow keeps its measurements and skips re-render.
+    if (prev.data === node.data && samePosition(prev.position, position)) return prev;
+    // Start from the previous node to keep `measured`/handle bounds (avoids hide + re-measure flicker).
+    return { ...prev, ...node, position, selected: prev.selected ?? false };
   });
+}
+
+function samePosition(a, b) {
+  return !!a && !!b && a.x === b.x && a.y === b.y;
 }
 
 function mergeEdges(prevEdges, nextEdges, snapshotIsEmpty) {
@@ -182,10 +187,12 @@ function mergeEdges(prevEdges, nextEdges, snapshotIsEmpty) {
     return prevEdges;
   }
   const prevMap = new Map(prevEdges.map((e) => [e.id, e]));
-  return nextEdges.map((edge) => ({
-    ...edge,
-    selected: prevMap.get(edge.id)?.selected ?? false,
-  }));
+  return nextEdges.map((edge) => {
+    const prev = prevMap.get(edge.id);
+    // Edge data is cached per content, so identical data means an identical edge.
+    if (prev && prev.data === edge.data) return prev;
+    return { ...edge, selected: prev?.selected ?? false };
+  });
 }
 
 function buildCanvasStructureKey({
@@ -355,6 +362,11 @@ export default function NDIFlowEditor() {
   const userLayoutRef = useRef(false);
   const nodePositionsRef = useRef({});
   const canvasStructureKeyRef = useRef('');
+  // Content-keyed caches: unchanged devices/edges keep the same object across snapshots,
+  // so memoized node components and React Flow skip work.
+  const nodeDataCacheRef = useRef(new Map());
+  const edgeCacheRef = useRef(new Map());
+  const visibleConnectionsRef = useRef([]);
   const snapshotDebounceRef = useRef(null);
   // Ordering: drop any payload older than the newest one accepted (REST polls and pushes race).
   const lastSnapshotIdRef = useRef({ instanceId: '', sequence: -1 });
@@ -602,11 +614,36 @@ export default function NDIFlowEditor() {
     return { sourceName, receiverUuid, sourceChannel, targetChannel, sourceDevice, targetDevice };
   }, []);
 
-  const persistPositions = useCallback((positions) => {
-    nodePositionsRef.current = positions;
-    setNodePositions(positions);
-    localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(positions));
-  }, []);
+  // Moves nodes on the canvas now (not on the next snapshot).
+  const applyPositionsToFlow = useCallback((positions) => {
+    setNodes((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.map((node) => {
+        const nextPos = positions[node.id];
+        if (!nextPos || samePosition(node.position, nextPos)) return node;
+        changed = true;
+        return { ...node, position: { x: nextPos.x, y: nextPos.y } };
+      });
+      return changed ? next : prev;
+    });
+  }, [setNodes]);
+
+  /**
+   * Saves positions and applies them to the canvas.
+   * merge=true keeps positions of nodes not in `positions` (host-filtered layouts, presets).
+   */
+  const persistPositions = useCallback((positions, { merge = false } = {}) => {
+    const next = merge ? { ...nodePositionsRef.current, ...positions } : positions;
+    nodePositionsRef.current = next;
+    setNodePositions(next);
+    try {
+      localStorage.setItem('ndi-multichannel-node-positions', JSON.stringify(next));
+    } catch {
+      // Storage full or unavailable: layout still applies for this session.
+    }
+    applyPositionsToFlow(positions);
+  }, [applyPositionsToFlow]);
 
   const resetLayout = useCallback(() => {
     userLayoutRef.current = false;
@@ -642,16 +679,8 @@ export default function NDIFlowEditor() {
       });
     };
 
-    const applyPositionsToFlow = (positions) => {
-      setNodes((prev) => {
-        if (prev.length === 0) return prev;
-        return prev.map((node) => {
-          const nextPos = positions[node.id];
-          if (!nextPos) return node;
-          return { ...node, position: { x: nextPos.x, y: nextPos.y } };
-        });
-      });
-    };
+    // With a host filter only those devices are laid out: keep everyone else's saved position.
+    const partial = selectedHostKeys.size > 0;
 
     const applyHostLayout = (nodes = null) => {
       const enrichedNodes = nodes?.length ? enrichNodesWithDomMeasurements(nodes) : null;
@@ -663,8 +692,7 @@ export default function NDIFlowEditor() {
         enrichedNodes,
         hostKeys,
       );
-      persistPositions(positions);
-      applyPositionsToFlow(positions);
+      persistPositions(positions, { merge: partial });
       return positions;
     };
 
@@ -713,7 +741,6 @@ export default function NDIFlowEditor() {
     expandedDeviceKeys,
     compactDeviceKeys,
     persistPositions,
-    setNodes,
     toast,
   ]);
 
@@ -741,12 +768,23 @@ export default function NDIFlowEditor() {
       toast('No preset saved for this host', 'warning');
       return;
     }
-    if (preset.nodePositions) persistPositions(preset.nodePositions);
+    if (preset.nodePositions) {
+      const hostNodeIds = new Set([
+        ...filterDevicesByHost(snapshot.senders, singleHostKey).map((d) => `sender-device-${d.deviceKey}`),
+        ...filterDevicesByHost(snapshot.receivers, singleHostKey).map((d) => `receiver-device-${d.deviceKey}`),
+      ]);
+      const hostPositions = Object.fromEntries(
+        Object.entries(preset.nodePositions).filter(([id]) => hostNodeIds.has(id)),
+      );
+      userLayoutRef.current = true;
+      setAutoMeasureLayout(false);
+      persistPositions(hostPositions, { merge: true });
+    }
     if (preset.senderFilter != null) setSenderFilter(preset.senderFilter);
     if (preset.receiverFilter != null) setReceiverFilter(preset.receiverFilter);
     if (preset.showActiveOnly != null) setShowActiveOnly(preset.showActiveOnly);
     toast(`Preset loaded for ${singleHostKey}`, 'success');
-  }, [singleHostKey, persistPositions, toast]);
+  }, [singleHostKey, snapshot.senders, snapshot.receivers, persistPositions, toast]);
 
   const bulkDisconnectHost = useCallback(async () => {
     if (!singleHostKey) {
@@ -1104,20 +1142,44 @@ export default function NDIFlowEditor() {
       return resolvePosition(nodeId);
     };
 
+    visibleConnectionsRef.current = visibleConnections;
+    const nodeDataCache = nodeDataCacheRef.current;
+    const liveNodeIds = new Set();
+
     const buildNodeData = (device, rolePrefix) => {
       const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
       const channelCount = device.channels?.length || 0;
       const isCollapsed = device.isBridgeHub
         ? (channelCount > 1 ? !expandedDeviceKeys.has(nodeId) : false)
         : channelCount > COLLAPSE_CHANNELS_THRESHOLD && !expandedDeviceKeys.has(nodeId);
+      const connectedIds = connectedByDeviceKey.get(device.deviceKey) || new Set();
+      const logicalCount = logicalConnectionsByDeviceKey.get(device.deviceKey) || 0;
+      const compactView = compactDeviceKeys.has(nodeId);
+      const cacheKey = JSON.stringify([
+        device,
+        isCollapsed,
+        compactView,
+        logicalCount,
+        [...connectedIds].sort(),
+      ]);
+      liveNodeIds.add(nodeId);
+      const cached = nodeDataCache.get(nodeId);
+      if (cached && cached.key === cacheKey) return cached.data;
+
+      const data = buildFreshNodeData(device, rolePrefix, nodeId, isCollapsed, connectedIds, logicalCount, compactView);
+      nodeDataCache.set(nodeId, { key: cacheKey, data });
+      return data;
+    };
+
+    const buildFreshNodeData = (device, rolePrefix, nodeId, isCollapsed, connectedIds, logicalCount, compactView) => {
       return {
         ...device,
         isAggregated: true,
         isCollapsed,
         maxVisibleHandles: MAX_VISIBLE_HANDLES_WHEN_COLLAPSED,
-        connectedChannelIds: connectedByDeviceKey.get(device.deviceKey) || new Set(),
-        logicalConnectionCount: logicalConnectionsByDeviceKey.get(device.deviceKey) || 0,
-        compactView: compactDeviceKeys.has(nodeId),
+        connectedChannelIds: connectedIds,
+        logicalConnectionCount: logicalCount,
+        compactView,
         onToggleCompactView: () => toggleCompactDevice(nodeId),
         onToggleExpand: () => toggleDeviceExpanded(nodeId),
         onChannelSelect: (channel) => handleChannelSelect({
@@ -1126,7 +1188,8 @@ export default function NDIFlowEditor() {
           role: rolePrefix === 'sender' ? 'sender' : 'receiver',
         }),
         onFocusConnections: () => {
-          const related = visibleConnections.filter((c) =>
+          // Read through a ref: cached data may outlive the snapshot it was built from.
+          const related = visibleConnectionsRef.current.filter((c) =>
             rolePrefix === 'sender'
               ? c.senderDeviceKey === device.deviceKey
               : c.receiverDeviceKey === device.deviceKey);
@@ -1169,6 +1232,9 @@ export default function NDIFlowEditor() {
     });
 
     const nextNodes = [...senderNodes, ...receiverNodes];
+    nodeDataCache.forEach((_, id) => {
+      if (!liveNodeIds.has(id)) nodeDataCache.delete(id);
+    });
     const snapshotIsEmpty = snapshot.senders.length === 0 && snapshot.receivers.length === 0;
     const structureKey = buildCanvasStructureKey({
       filteredSenders,
@@ -1193,6 +1259,8 @@ export default function NDIFlowEditor() {
     });
 
     const nextEdges = [];
+    const edgeCache = edgeCacheRef.current;
+    const liveEdgeIds = new Set();
     groupedConnections.forEach((connections) => {
       const ordered = [...connections].sort((a, b) => {
         const ai = Number(a.senderChannelId?.replace(/[^\d]/g, '')) || 0;
@@ -1205,8 +1273,16 @@ export default function NDIFlowEditor() {
         const color = confirmed ? '#4ade80' : '#facc15';
         const sourceNodeId = `sender-device-${conn.senderDeviceKey}`;
         const targetNodeId = `receiver-device-${conn.receiverDeviceKey}`;
+        const edgeId = `edge-${conn.connectionId}`;
+        const edgeKey = JSON.stringify([conn, laneIndex, ordered.length, confirmed]);
+        liveEdgeIds.add(edgeId);
+        const cachedEdge = edgeCache.get(edgeId);
+        if (cachedEdge && cachedEdge.key === edgeKey) {
+          nextEdges.push(cachedEdge.edge);
+          return;
+        }
 
-        nextEdges.push({
+        const edge = {
           id: `edge-${conn.connectionId}`,
           type: 'custom',
           source: sourceNodeId,
@@ -1237,8 +1313,13 @@ export default function NDIFlowEditor() {
               });
             },
           },
-        });
+        };
+        edgeCache.set(edgeId, { key: edgeKey, edge });
+        nextEdges.push(edge);
       });
+    });
+    edgeCache.forEach((_, id) => {
+      if (!liveEdgeIds.has(id)) edgeCache.delete(id);
     });
 
     if (!structureChanged) {
@@ -1249,10 +1330,12 @@ export default function NDIFlowEditor() {
           const fresh = nextById.get(node.id);
           if (!fresh) return node;
           const keepDragPosition = node.position && draggingNodeIdsRef.current.has(node.id);
+          const position = keepDragPosition ? node.position : resolvePosition(node.id);
+          if (node.data === fresh.data && samePosition(node.position, position)) return node;
           return {
             ...node,
             data: fresh.data,
-            position: keepDragPosition ? node.position : resolvePosition(node.id),
+            position,
           };
         });
       });

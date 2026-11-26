@@ -53,6 +53,9 @@ public class NDIDiscoveryService : BackgroundService
     private readonly ConcurrentDictionary<string, DateTime> _receiverUuidLastSeen = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan EventCacheRetention = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DiscoveryStallThreshold = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PushHeartbeatInterval = TimeSpan.FromSeconds(10);
+    private string? _lastPushedFingerprint;
+    private DateTime _lastPushAt = DateTime.MinValue;
     private bool _prevSendConnected;
     private bool _prevRecvConnected;
 
@@ -130,6 +133,9 @@ public class NDIDiscoveryService : BackgroundService
         }
 
         RefreshListenerState();
+        // Startup is not a "reconnect": subscriptions are created by the first discovery pass.
+        _prevSendConnected = _sendListenerConnected;
+        _prevRecvConnected = _recvListenerConnected;
     }
 
     /// <summary>
@@ -400,8 +406,17 @@ public class NDIDiscoveryService : BackgroundService
         if (_hubContext == null)
             return;
 
+        // Skip identical pushes (idle networks) but keep a heartbeat so clients see the backend is alive.
+        // New/reconnected clients fetch /devices themselves, so they never wait for a change.
+        var fingerprint = ComputeSnapshotFingerprint(snapshot, status);
+        var now = DateTime.UtcNow;
+        if (fingerprint == _lastPushedFingerprint && now - _lastPushAt < PushHeartbeatInterval)
+            return;
+
         try
         {
+            _lastPushedFingerprint = fingerprint;
+            _lastPushAt = now;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await _hubContext.Clients.All.SendAsync("snapshotUpdated", new { snapshot, status }, timeout.Token);
         }
@@ -409,6 +424,23 @@ public class NDIDiscoveryService : BackgroundService
         {
             _logger.LogDebug(ex, "SignalR snapshot publish failed");
         }
+    }
+
+    /// <summary>Hash of everything clients render, excluding per-pass fields (sequence, timestamps).</summary>
+    private static string ComputeSnapshotFingerprint(NDIAggregatedSnapshot snapshot, NdiSystemStatus status)
+    {
+        var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            snapshot.Senders,
+            snapshot.Receivers,
+            snapshot.Connections,
+            status.Health,
+            status.SendListenerConnected,
+            status.RecvListenerConnected,
+            status.SendListenerServerUrl,
+            status.RecvListenerServerUrl,
+        });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
     }
 
     public List<NDISenderInfo> GetSenders()
@@ -1043,6 +1075,13 @@ public class NDIDiscoveryService : BackgroundService
         {
             if (string.IsNullOrEmpty(evt.ReceiverUuid))
                 continue;
+
+            if (string.Equals(evt.EventName, "source-name", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(evt.EventName, "connection-state", StringComparison.OrdinalIgnoreCase))
+            {
+                // Routing changes are rare and the key trail for "why is this receiver (not) connected".
+                _logger.LogInformation("Receiver {Uuid} {Event} = '{Value}'", evt.ReceiverUuid, evt.EventName, evt.EventValue);
+            }
 
             if (string.Equals(evt.EventName, "source-name", StringComparison.OrdinalIgnoreCase))
             {

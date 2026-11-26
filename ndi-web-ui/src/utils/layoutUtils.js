@@ -329,12 +329,37 @@ export function mergeLayoutWithNewDevices(
   expandedDeviceKeys = new Set(),
   compactDeviceKeys = new Set(),
 ) {
-  const layout = computeDefaultLayout(senders, receivers, expandedDeviceKeys, compactDeviceKeys);
-  const merged = { ...layout };
-
+  const merged = {};
   Object.entries(existingPositions || {}).forEach(([id, position]) => {
     if (isValidSavedPosition(position)) merged[id] = position;
   });
+
+  // New devices go below the lowest already-placed device of the same role, instead of the
+  // default slots from the top (which are usually occupied and caused overlapping cards).
+  // Saved slots of devices currently offline count as occupied too, so they do not collide when they return.
+  const placeNew = (devices, rolePrefix, x) => {
+    const prefix = `${rolePrefix}-device-`;
+    const deviceById = new Map(devices.map((d) => [`${prefix}${d.deviceKey}`, d]));
+    let nextY = DEFAULT_NODE_Y_START;
+    Object.entries(merged).forEach(([nodeId, pos]) => {
+      if (!nodeId.startsWith(prefix)) return;
+      const device = deviceById.get(nodeId);
+      const height = device
+        ? estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compactDeviceKeys.has(nodeId))
+        : MEASURED_HEIGHT_FALLBACK;
+      nextY = Math.max(nextY, pos.y + height + NODE_VERTICAL_PADDING);
+    });
+    devices.forEach((device) => {
+      const nodeId = `${rolePrefix}-device-${device.deviceKey}`;
+      if (merged[nodeId]) return;
+      merged[nodeId] = { x, y: nextY };
+      const compact = compactDeviceKeys.has(nodeId);
+      nextY += estimateAggregatedNodeHeight(device, expandedDeviceKeys, rolePrefix, compact) + NODE_VERTICAL_PADDING;
+    });
+  };
+
+  placeNew(senders, 'sender', DEFAULT_SENDER_X);
+  placeNew(receivers, 'receiver', DEFAULT_RECEIVER_X);
 
   return merged;
 }
