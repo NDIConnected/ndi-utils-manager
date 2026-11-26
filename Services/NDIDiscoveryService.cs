@@ -656,7 +656,7 @@ public class NDIDiscoveryService : BackgroundService
 
         if (appId == "unknown" && !string.IsNullOrWhiteSpace(fallbackName))
         {
-            var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([A-Za-z0-9_.-]+)", RegexOptions.IgnoreCase);
+            var appMatch = Regex.Match(fallbackName, @"(?:app|application)\s*[:=]\s*([\p{L}\p{M}\p{N}_.-]+)", RegexOptions.IgnoreCase);
             if (appMatch.Success)
                 appId = appMatch.Groups[1].Value;
         }
@@ -768,8 +768,9 @@ public class NDIDiscoveryService : BackgroundService
         if (string.IsNullOrWhiteSpace(value))
             return fallback;
 
-        var cleaned = Regex.Replace(value.Trim(), @"[^A-Za-z0-9_.-]+", "-");
-        if (string.IsNullOrWhiteSpace(cleaned))
+        // Keep Unicode letters/digits (accented and non-Latin NDI names), collapse everything else to '-'.
+        var cleaned = Regex.Replace(value.Trim(), @"[^\p{L}\p{M}\p{N}_.-]+", "-");
+        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Trim('-').Length == 0)
             return fallback;
 
         // Treat placeholder tokens as missing identity values.
@@ -792,7 +793,7 @@ public class NDIDiscoveryService : BackgroundService
 
         var tokenMatch = Regex.Match(
             source,
-            $@"(?:^|[\[\s;]){Regex.Escape(key)}\s*=\s*([A-Za-z0-9_.-]+)",
+            $@"(?:^|[\[\s;]){Regex.Escape(key)}\s*=\s*([\p{{L}}\p{{M}}\p{{N}}_.-]+)",
             RegexOptions.IgnoreCase);
 
         if (!tokenMatch.Success)

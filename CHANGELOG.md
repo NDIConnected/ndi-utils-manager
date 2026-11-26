@@ -6,6 +6,7 @@
 
 - Built and tested against **NDI SDK 6.4.0** (runtime `6.4.0.2`); runtime version now logged at startup and exposed as `ndiSdkVersion` in `/api/ndi/status`.
 - P/Invoke string parameters (`send_connect`, `subscribe_events`, `unsubscribe_events`) marshalled as **UTF-8** instead of ANSI: sources/receivers with non-ASCII names (e.g. `Città`) now connect correctly.
+- Device/host identity parsing keeps Unicode letters: senders like `èèè (òòòòò)` were shown as `-` (name collapsed by an ASCII-only sanitizer).
 - Added 6.4 `recv_bandwidth` values (`video_only_lowest`, `video_only_highest`) and `NDIlib_version()` binding.
 - Send/Recv listeners are re-created every 10 s when no Discovery Server was reachable at startup (SDK create returns NULL in that case).
 
