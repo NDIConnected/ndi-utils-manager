@@ -6,7 +6,7 @@ namespace NDIManager.Services;
 /// <summary>
 /// Minimal daily-rolling file logger (no extra dependencies). In WinExe mode the default
 /// console/debug providers go nowhere, so this is the only persistent diagnostic trail.
-/// Files: <c>%LocalAppData%\NDIManager\logs\ndimanager-yyyyMMdd.log</c>, newest <see cref="RetainedFiles"/> kept.
+/// Files: <c>&lt;data dir&gt;/logs/ndimanager-yyyyMMdd.log</c> (see <see cref="NDIManager.Hosting.AppPaths"/>), newest <see cref="RetainedFiles"/> kept.
 /// </summary>
 public sealed class FileLoggerProvider : ILoggerProvider
 {
@@ -24,8 +24,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         _directory = directory;
     }
 
-    public static string DefaultDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NDIManager", "logs");
+    public static string DefaultDirectory => NDIManager.Hosting.AppPaths.LogsDirectory;
 
     public ILogger CreateLogger(string categoryName) =>
         _loggers.GetOrAdd(categoryName, name => new FileLogger(this, name));

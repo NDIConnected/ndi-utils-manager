@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
-using System.Text.Json;
-using NDIManager.Hubs;
+using NDIManager.Hosting;
 using NDIManager.Models;
 using NDIManager.Services;
 
@@ -13,10 +12,8 @@ public class TrayApplicationContext : ApplicationContext
     private readonly string[] _args;
     private readonly string _settingsPath;
 
-    private WebApplication? _webApp;
-    private CancellationTokenSource? _cts;
-    private Task? _runTask;
     private readonly FileLoggerProvider _fileLogger = new(FileLoggerProvider.DefaultDirectory);
+    private readonly NdiManagerHost _host;
     private int _currentPort;
     private bool _serverRunning;
 
@@ -24,7 +21,6 @@ public class TrayApplicationContext : ApplicationContext
     private ToolStripMenuItem? _statusMenuItem;
     private ToolStripMenuItem? _discoveryMenuItem;
 
-    private NDIDiscoveryService? _discoveryService;
     private Icon? _iconGreen;
     private Icon? _iconYellow;
     private Icon? _iconRed;
@@ -35,7 +31,9 @@ public class TrayApplicationContext : ApplicationContext
     {
         _args = args;
         _settingsPath = InitSettingsPath();
-        _currentPort = LoadPort();
+        _currentPort = ManagerSettings.LoadPort(_settingsPath);
+        _host = new NdiManagerHost(_fileLogger);
+        _host.StatusUpdated += OnDiscoverySnapshotUpdated;
 
         _trayIcon = new NotifyIcon
         {
@@ -109,61 +107,9 @@ public class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            _cts = new CancellationTokenSource();
-
-            // Anchor content root (wwwroot, appsettings.json) to the exe folder, not the current
-            // working directory: shortcuts/scripts may start the app from anywhere.
-            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-            {
-                Args = _args,
-                ContentRootPath = AppContext.BaseDirectory,
-            });
-
-            // Services
-            builder.Services.AddControllers();
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
-
-            builder.Services.AddCors(options =>
-            {
-                options.AddPolicy("AllowReactSPA", policy =>
-                {
-                    policy.AllowAnyOrigin()
-                          .AllowAnyMethod()
-                          .AllowAnyHeader();
-                });
-            });
-
-            builder.Services.AddSignalR();
-
-            builder.Services.AddSingleton<NDIDiscoveryService>();
-            builder.Services.AddHostedService<NDIDiscoveryService>(
-                sp => sp.GetRequiredService<NDIDiscoveryService>());
-
-            builder.WebHost.UseUrls($"http://localhost:{_currentPort}", $"http://*:{_currentPort}");
-
-            // In WinExe mode console logging goes nowhere: persist to %LocalAppData%\NDIManager\logs
-            // (shared provider instance, survives web host restarts; per-tick traces are Debug).
-            builder.Logging.SetMinimumLevel(LogLevel.Warning);
-            builder.Logging.AddFilter("NDIManager", LogLevel.Information);
-            builder.Logging.AddProvider(_fileLogger);
-
-            _webApp = builder.Build();
-
-            // Middleware pipeline
-            _webApp.UseSwagger();
-            _webApp.UseSwaggerUI();
-            _webApp.UseCors("AllowReactSPA");
-            _webApp.UseDefaultFiles();
-            _webApp.UseStaticFiles();
-            _webApp.UseWebSockets();
-            _webApp.UseAuthorization();
-            _webApp.MapControllers();
-            _webApp.MapHub<NdiHub>("/hubs/ndi");
-            _webApp.MapFallbackToFile("index.html");
-
-            _discoveryService = _webApp.Services.GetRequiredService<NDIDiscoveryService>();
-            _discoveryService.SnapshotUpdated += OnDiscoverySnapshotUpdated;
+            // Server, API and discovery come from NDIManager.Core (shared with the Linux app).
+            // In WinExe mode console logging goes nowhere: logs go to the shared file logger.
+            await _host.StartAsync(_currentPort, _args);
 
             UpdateStatus(true);
 
@@ -172,9 +118,6 @@ public class TrayApplicationContext : ApplicationContext
                 "NDI Manager",
                 $"Running on http://localhost:{_currentPort}",
                 ToolTipIcon.Info);
-
-            _runTask = _webApp.RunAsync(_cts.Token);
-            await _runTask;
         }
         catch (OperationCanceledException)
         {
@@ -193,41 +136,14 @@ public class TrayApplicationContext : ApplicationContext
 
     private async Task StopWebServerAsync()
     {
-        if (_cts != null)
-            await _cts.CancelAsync();
-
-        // Wait for the host to finish stopping (discovery loop ended, NDI released, port freed)
-        // before disposing or starting a new instance.
-        if (_runTask != null)
+        // Waits for the discovery loop to end, NDI handles to be released and the port to be freed.
+        try
         {
-            try
-            {
-                await _runTask;
-            }
-            catch
-            {
-                // Errors are reported by StartWebServerAsync.
-            }
-            _runTask = null;
+            await _host.StopAsync();
         }
-
-        _cts?.Dispose();
-        _cts = null;
-
-        if (_discoveryService != null)
+        catch
         {
-            _discoveryService.SnapshotUpdated -= OnDiscoverySnapshotUpdated;
-            _discoveryService = null;
-        }
-
-        if (_webApp != null)
-        {
-            try
-            {
-                await _webApp.DisposeAsync();
-            }
-            catch { }
-            _webApp = null;
+            // Errors while stopping are not actionable from the tray.
         }
 
         _serverRunning = false;
@@ -250,7 +166,7 @@ public class TrayApplicationContext : ApplicationContext
 
     private void OnDiscoverySnapshotUpdated(NdiSystemStatus status)
     {
-        if (_discoveryService == null)
+        if (!_host.IsRunning)
             return;
 
         try
@@ -365,7 +281,7 @@ public class TrayApplicationContext : ApplicationContext
         if (dialog.ShowDialog() == DialogResult.OK && dialog.SelectedPort != _currentPort)
         {
             _currentPort = dialog.SelectedPort;
-            SavePort(_currentPort);
+            ManagerSettings.SavePort(_currentPort, _settingsPath);
 
             if (_portMenuItem != null)
                 _portMenuItem.Text = $"Port: {_currentPort}";
@@ -387,39 +303,8 @@ public class TrayApplicationContext : ApplicationContext
 
     private static string InitSettingsPath()
     {
-        var folder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "NDIManager");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, "settings.json");
-    }
-
-    private int LoadPort()
-    {
-        try
-        {
-            if (File.Exists(_settingsPath))
-            {
-                var json = File.ReadAllText(_settingsPath);
-                var settings = JsonSerializer.Deserialize<ManagerSettings>(json);
-                if (settings?.Port is > 0 and <= 65535)
-                    return settings.Port;
-            }
-        }
-        catch { }
-
-        return 5000;
-    }
-
-    private void SavePort(int port)
-    {
-        try
-        {
-            var settings = new ManagerSettings { Port = port };
-            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_settingsPath, json);
-        }
-        catch { }
+        Directory.CreateDirectory(AppPaths.DataDirectory);
+        return AppPaths.SettingsPath;
     }
 
     #endregion
@@ -505,27 +390,17 @@ public class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
-            if (_discoveryService != null)
-                _discoveryService.SnapshotUpdated -= OnDiscoverySnapshotUpdated;
+            _host.StatusUpdated -= OnDiscoverySnapshotUpdated;
 
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
             _iconGreen?.Dispose();
             _iconYellow?.Dispose();
             _iconRed?.Dispose();
-            _cts?.Dispose();
             _fileLogger.Dispose();
         }
         base.Dispose(disposing);
     }
-}
-
-/// <summary>
-/// Application settings persisted to disk
-/// </summary>
-public class ManagerSettings
-{
-    public int Port { get; set; } = 5000;
 }
 
 /// <summary>

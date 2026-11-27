@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=NDI Manager
+GenericName=NDI routing manager
+Comment=NDI discovery and routing with a Web UI (tray icon)
+Exec=/usr/bin/ndi-manager
+Icon=ndi-manager
+Terminal=false
+Categories=AudioVideo;Video;Network;
+Keywords=NDI;video;routing;discovery;
+StartupNotify=false

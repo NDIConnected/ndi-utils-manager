@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Linux build of NDI Manager: `ndi-manager` executable.
+       - desktop session: tray icon (Avalonia, StatusNotifierItem) + web server, or tray-only client when the
+         systemd service already serves the configured port;
+       - `ndi-manager service mode` (command-line flag "service"): headless server for systemd. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ndi-manager</AssemblyName>
+    <RootNamespace>NDIManager.Linux</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Only ordinal/invariant comparisons are used: no ICU dependency (package names differ per distro). -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationManifest />
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+
+    <Version>3.3.0</Version>
+    <AssemblyVersion>3.3.0.0</AssemblyVersion>
+    <FileVersion>3.3.0.0</FileVersion>
+    <Company>NDI Manager</Company>
+    <Product>NDI Manager</Product>
+    <Description>NDI Discovery and Control Manager with Web UI (Linux)</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NDIManager.Core\NDIManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <!-- Web UI built by `npm run build` and synced to ..\wwwroot (scripts/publish-*.{ps1,sh}). -->
+  <ItemGroup>
+    <Content Include="..\wwwroot\**" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

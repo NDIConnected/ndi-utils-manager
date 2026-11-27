@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # System user for the service (no login, data in /var/lib/ndi-manager).
+    if ! getent passwd ndi-manager >/dev/null; then
+        adduser --system --group --home /var/lib/ndi-manager --no-create-home \
+            --gecos "NDI Manager service" ndi-manager >/dev/null
+    fi
+    mkdir -p /var/lib/ndi-manager
+    chown ndi-manager:ndi-manager /var/lib/ndi-manager
+
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        systemctl enable ndi-manager.service >/dev/null 2>&1 || true
+        systemctl restart ndi-manager.service || true
+    fi
+
+    if ! /opt/ndi-manager/ndi-manager --check-ndi >/dev/null 2>&1; then
+        echo "NDI Manager: the NDI runtime (libndi.so.6) was not found."
+        echo "  Install the NDI 6 SDK for Linux (https://ndi.video/for-developers/ndi-sdk/) and copy"
+        echo "  lib/x86_64-linux-gnu/libndi.so.6* to /usr/local/lib, then run: sudo ldconfig && sudo systemctl restart ndi-manager"
+    fi
+fi
+
+exit 0
