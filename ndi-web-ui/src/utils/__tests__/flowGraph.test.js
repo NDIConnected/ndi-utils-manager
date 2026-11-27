@@ -8,6 +8,7 @@ import {
   mergeEdges,
   mergeNodes,
   refreshNodes,
+  shouldHoldPreviousGraph,
 } from '../flowGraph';
 import { COLLAPSE_CHANNELS_THRESHOLD } from '../deviceGrouping';
 import { basicSnapshot, channel, connection, device } from './fixtures';
@@ -166,6 +167,24 @@ describe('optimistic connections', () => {
     const optimistic = new Map([['UUID-MON-IN1', {}], ['uuid-other', {}]]);
     expect(confirmedOptimisticReceivers([connection('cam', 'cam-out1', 'mon', 'mon-in1')], optimistic))
       .toEqual(['UUID-MON-IN1']);
+  });
+});
+
+describe('shouldHoldPreviousGraph', () => {
+  const empty = { senders: [], receivers: [], connections: [] };
+
+  it('holds the last graph while an empty snapshot is not confirmed (backend restarting, listeners down)', () => {
+    expect(shouldHoldPreviousGraph(empty, null)).toBe(true);
+    expect(shouldHoldPreviousGraph(empty, 'error')).toBe(true);
+    expect(shouldHoldPreviousGraph(empty, 'stalled')).toBe(true);
+  });
+
+  it('clears the canvas when the backend confirms the network is empty (last device gone)', () => {
+    expect(shouldHoldPreviousGraph(empty, 'idle')).toBe(false);
+  });
+
+  it('never holds when the snapshot has devices', () => {
+    expect(shouldHoldPreviousGraph(basicSnapshot(), null)).toBe(false);
   });
 });
 
