@@ -4,10 +4,10 @@
 
 > **Sample / reference software.** NDI Manager is an MIT-licensed community sample, **not officially supported** as a production product. The Web UI / API and NDI routing controls are intended for **trusted local networks**. See [SECURITY.md](SECURITY.md) before deploying on shared networks.
 
-Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
+Windows and Linux (.NET 9) app that runs in the **system tray** (or as a **systemd service** on Linux), hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
 **Version:** 3.3  
-**Platform:** Windows 10/11 x64  
+**Platform:** Windows 10/11 x64 · Linux x86_64 (see [DOCS/LINUX.md](DOCS/LINUX.md))  
 **.NET:** 9.0 (self-contained installer)  
 **Status:** Sample / R&D release  
 **Repository:** [NDIConnected/ndi-utils-manager](https://github.com/NDIConnected/ndi-utils-manager)
@@ -25,6 +25,20 @@ The published installer bundles the .NET runtime. End users do **not** need to i
 1. Run **`NDIManager-v3.3-Setup.exe`** from `Output\` (after building the installer) or your release package.  
 2. Use the **system tray** icon → **Open Web UI** (default `http://localhost:5000`).  
 3. Drag connections on the **Canvas** tab; use **Table** for a receiver list.
+
+## Linux
+
+Install the `.deb` (Debian/Ubuntu) or the `.tar.gz` (`install.sh`) from the release, plus the NDI 6 runtime (`libndi.so.6`) from the NDI SDK for Linux. The Web UI is served by `ndi-manager.service` on port 5000; `ndi-manager` in a desktop session adds the tray icon. Full guide: [DOCS/LINUX.md](DOCS/LINUX.md).
+
+## Project layout
+
+| Folder / project | What |
+|---|---|
+| `NDIManager.Core/` | Cross-platform server: web host, REST + SignalR API, NDI discovery, NDI P/Invoke wrapper |
+| `NDIManager.csproj` (root) | Windows tray app (WinForms) + Inno Setup installer |
+| `NDIManager.Linux/` | Linux app `ndi-manager`: tray icon (Avalonia) and `--service` mode |
+| `ndi-web-ui/` | React Web UI (served from `wwwroot/`) |
+| `packaging/linux/`, `scripts/package-linux.sh` | systemd unit, desktop entries, `.deb` / `.tar.gz` packaging |
 
 ## Development run
 

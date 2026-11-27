@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Linux (x86_64)
+
+- **New Linux build** (`ndi-manager`): same server and Web UI as Windows, as a **systemd service** (`ndi-manager.service`, port 5000) plus a **tray icon** (Avalonia, StatusNotifierItem) in desktop sessions. The tray runs the server itself, or only shows status and opens the Web UI when the service is already running.
+- Packages: `.deb` (Debian/Ubuntu: system user, service enabled, tray autostart) and `.tar.gz` with `install.sh`; self-contained, no .NET install needed. Built by CI and attached to releases (`release-linux.yml`).
+- NDI runtime located at run time (`libndi.so.6` in the app folder, `$NDI_RUNTIME_DIR_V6`, or the system library path); `ndi-manager --check-ndi` reports what was found. Guide: `DOCS/LINUX.md`.
+
+### Structure
+
+- Server, API, discovery and the NDI wrapper moved to the cross-platform **`NDIManager.Core`** project; the Windows tray app is now a thin shell over it (no change for Windows users).
+- Settings and logs folder can be overridden with `NDIMANAGER_DATA_DIR`.
+
 ## [Version 3.3] - 2026-11-27
 
 ### NDI SDK

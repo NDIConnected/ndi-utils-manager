@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/ndi-manager
+    if getent passwd ndi-manager >/dev/null; then
+        deluser --system ndi-manager >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

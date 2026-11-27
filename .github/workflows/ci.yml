@@ -35,8 +35,8 @@ jobs:
       - run: npm run build
 
   backend:
-    name: Backend (.NET build)
-    # net9.0-windows (WinForms tray app) builds on Windows only.
+    name: Backend (.NET build, Windows)
+    # net9.0-windows (WinForms tray app + NDIManager.Core) builds on Windows only.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,3 +49,39 @@ jobs:
       # missing — needed to run/publish, not to compile. Every other warning fails the build.
       - name: Build
         run: dotnet build NDIManager.csproj -c Release -warnaserror -warnnotaserror:NDIMGR001
+
+  linux:
+    name: Linux (build + .deb/.tar.gz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ndi-web-ui/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build (warnings are errors)
+        run: dotnet build NDIManager.Linux/NDIManager.Linux.csproj -c Release -warnaserror
+
+      # The NDI runtime is not bundled: the package asks for the NDI 6 SDK for Linux on the target.
+      - name: Package
+        run: ./scripts/package-linux.sh
+
+      - name: Inspect package
+        run: |
+          dpkg-deb --info dist/linux/*.deb
+          dpkg-deb --contents dist/linux/*.deb | grep -E 'ndi-manager(\.service|\.desktop|$)|wwwroot/index.html'
+          ./build/linux/app/ndi-manager --version
+          ./build/linux/app/ndi-manager --check-ndi || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ndi-manager-linux-x64
+          path: dist/linux/*
+          if-no-files-found: error

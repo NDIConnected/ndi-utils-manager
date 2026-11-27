@@ -26,6 +26,11 @@
     <Content Remove="NDI 6 SDK\**" />
     <None Remove="NDI 6 SDK\**" />
 
+    <Compile Remove="NDIManager.Core\**;NDIManager.Linux\**;packaging\**" />
+    <Content Remove="NDIManager.Core\**;NDIManager.Linux\**;packaging\**" />
+    <None Remove="NDIManager.Core\**;NDIManager.Linux\**;packaging\**" />
+    <EmbeddedResource Remove="NDIManager.Core\**;NDIManager.Linux\**" />
+
     <Content Remove="ndi-web-ui\**" />
     <None Remove="ndi-web-ui\**" />
 
@@ -72,9 +77,9 @@
     <None Update="MAN_icon.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Server, API and NDI discovery live in the cross-platform core; this project is the Windows tray shell. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+    <ProjectReference Include="NDIManager.Core\NDIManager.Core.csproj" />
   </ItemGroup>
 
 </Project>

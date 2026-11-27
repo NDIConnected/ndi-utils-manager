@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=NDI Manager (tray)
+Comment=Tray icon for NDI Manager; shows the service status and opens the Web UI
+Exec=/usr/bin/ndi-manager
+Icon=ndi-manager
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5

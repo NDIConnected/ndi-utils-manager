@@ -72,10 +72,24 @@ ThirdPartyLicenses/THIRD_PARTY_NOTICES.txt.
 
 ================================================================================
 
+4. Linux build only: Avalonia UI, SkiaSharp, HarfBuzzSharp, Tmds.DBus
+   (tray icon and port dialog of `ndi-manager` on Linux)
+   Avalonia — Copyright (c) AvaloniaUI OÜ and contributors — MIT License
+     Source: https://github.com/AvaloniaUI/Avalonia
+   SkiaSharp / HarfBuzzSharp — Copyright (c) .NET Foundation and Contributors — MIT License
+     Source: https://github.com/mono/SkiaSharp (bundles Skia, BSD-3-Clause, and HarfBuzz, "Old MIT")
+   Tmds.DBus.Protocol — Copyright (c) Tom Deseyn — MIT License
+     Source: https://github.com/tmds/Tmds.DBus
+   MicroCom.Runtime — Copyright (c) Nikita Tsukanov — MIT License
+     Source: https://github.com/kekekeks/MicroCom
+
+================================================================================
+
 NDI REDISTRIBUTION & TRADEMARK (for installers and forks)
 
 - Installers built from this repository may bundle Processing.NDI.Lib.x64.dll
-  (Windows). That native runtime is **not** MIT-licensed; it is subject to the
+  (Windows). The Linux packages do not bundle libndi.so.6 by default (the user
+  installs the NDI SDK for Linux). The NDI native runtime is **not** MIT-licensed; it is subject to the
   NDI SDK license (http://ndi.link/ndisdk_license). Ship
   Processing.NDI.Lib.Licenses.txt with the NDI binary.
 - Forks that ship installers inherit the obligation to include NDI SDK
@@ -94,7 +108,8 @@ ADDITIONAL NOTICES
 Operating System APIs:
 This software uses Windows operating system APIs (WinForms tray host / Win32)
 and HTTP localhost APIs, which are part of the Windows operating system and
-subject to Microsoft's Windows license terms.
+subject to Microsoft's Windows license terms. On Linux it uses systemd, D-Bus
+(StatusNotifierItem tray), X11 and xdg-utils provided by the distribution.
 
 ================================================================================
 
@@ -109,8 +124,8 @@ copyright holders directly.
 
 ================================================================================
 
-This document applies to NDI Manager v3.2
-Last updated: July 2026
+This document applies to NDI Manager v3.3 (Windows and Linux)
+Last updated: November 2026
 
 Copyright (c) 2026 Vizrt NDI AB
 NDI Manager is MIT-licensed application software — see LICENSE
