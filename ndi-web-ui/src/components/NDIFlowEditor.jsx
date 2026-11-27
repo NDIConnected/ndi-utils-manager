@@ -32,6 +32,7 @@ import {
   mergeNodes,
   mergeEdges,
   refreshNodes,
+  shouldHoldPreviousGraph,
 } from '../utils/flowGraph';
 
 const LINK_LABELS = {
@@ -262,6 +263,8 @@ export default function NDIFlowEditor() {
     });
   }, []);
 
+  const backendHealth = systemStatus?.health ?? null;
+
   // ---- snapshot / view state → React Flow nodes and edges
   useEffect(() => {
     const viewFilters = { senderFilter, receiverFilter, selectedHostKeys, showActiveOnly };
@@ -289,8 +292,10 @@ export default function NDIFlowEditor() {
     });
     visibleConnectionsRef.current = visibleConnections;
 
-    const snapshotIsEmpty = snapshot.senders.length === 0 && snapshot.receivers.length === 0;
-    const structureKey = buildCanvasStructureKey({
+    // Hold the last graph only while an empty snapshot is unconfirmed (backend restarting); once the
+    // network is confirmed empty (last device gone), clear the canvas instead of showing stale cards.
+    const holdPreviousGraph = shouldHoldPreviousGraph(snapshot, backendHealth);
+    const structureKey = holdPreviousGraph ? 'held-while-unconfirmed' : buildCanvasStructureKey({
       filteredSenders,
       filteredReceivers,
       visibleConnections,
@@ -303,13 +308,14 @@ export default function NDIFlowEditor() {
     canvasStructureKeyRef.current = structureKey;
 
     if (structureChanged) {
-      setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current, snapshotIsEmpty));
+      setNodes((prev) => mergeNodes(prev, nextNodes, draggingNodeIdsRef.current, holdPreviousGraph));
     } else {
       setNodes((prev) => refreshNodes(prev, nextNodes, draggingNodeIdsRef.current, positionOf));
     }
-    setEdges((prev) => mergeEdges(prev, nextEdges, snapshotIsEmpty));
+    setEdges((prev) => mergeEdges(prev, nextEdges, holdPreviousGraph));
   }, [
     snapshot,
+    backendHealth,
     senderFilter,
     receiverFilter,
     selectedHostKeys,

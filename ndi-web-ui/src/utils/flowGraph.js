@@ -14,12 +14,22 @@ export function samePosition(a, b) {
 }
 
 /**
+ * Whether to keep the last graph for an empty snapshot. The backend reports health "idle" only when both
+ * listeners are connected and no device exists, so only then is "nothing on the network" trusted.
+ */
+export function shouldHoldPreviousGraph(snapshot, health) {
+  const empty = snapshot.senders.length === 0 && snapshot.receivers.length === 0;
+  return empty && health !== 'idle';
+}
+
+/**
  * Merges freshly built nodes into React Flow's current nodes.
- * - Keeps the previous graph only while the raw snapshot is empty (backend restart), never for empty filter results.
+ * - `holdPrevious`: keep the previous graph while an empty snapshot is not yet confirmed by the backend
+ *   (restart, listeners reconnecting). Never set for empty filter results or a confirmed-empty network.
  * - Reuses unchanged node objects (identity) and keeps `measured`/handle bounds for changed ones.
  */
-export function mergeNodes(prevNodes, nextNodes, draggingNodeIds, snapshotIsEmpty) {
-  if (snapshotIsEmpty && nextNodes.length === 0 && prevNodes.length > 0) {
+export function mergeNodes(prevNodes, nextNodes, draggingNodeIds, holdPrevious) {
+  if (holdPrevious && nextNodes.length === 0 && prevNodes.length > 0) {
     return prevNodes;
   }
   const prevMap = new Map(prevNodes.map((n) => [n.id, n]));
@@ -34,8 +44,8 @@ export function mergeNodes(prevNodes, nextNodes, draggingNodeIds, snapshotIsEmpt
 }
 
 /** Same rules as {@link mergeNodes}; edges are cached per content, so equal data means an identical edge. */
-export function mergeEdges(prevEdges, nextEdges, snapshotIsEmpty) {
-  if (snapshotIsEmpty && nextEdges.length === 0 && prevEdges.length > 0) {
+export function mergeEdges(prevEdges, nextEdges, holdPrevious) {
+  if (holdPrevious && nextEdges.length === 0 && prevEdges.length > 0) {
     return prevEdges;
   }
   const prevMap = new Map(prevEdges.map((e) => [e.id, e]));
