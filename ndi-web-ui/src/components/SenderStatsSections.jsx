@@ -39,7 +39,7 @@ const ui = {
     fontSize: '10px',
     color: '#9ca3af',
     fontWeight: '400',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -66,7 +66,7 @@ const ui = {
     marginBottom: '2px',
   },
   label: { color: '#9ca3af' },
-  value: { fontFamily: 'monospace', color: '#e5e7eb', textAlign: 'right' },
+  value: { fontFamily: 'var(--ndi-mono)', color: '#e5e7eb', textAlign: 'right' },
   moreBtn: {
     marginTop: '6px',
     width: '100%',

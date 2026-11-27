@@ -1,5 +1,5 @@
 import { Handle, Position } from '@xyflow/react';
-import { pickPrimaryCompactChannel } from './compactNodeHelpers';
+import { hexToRgba, pickPrimaryCompactChannel } from './compactNodeHelpers';
 
 /**
  * Invisible, non-connectable handles for connected channels that a collapsed node does not list,
@@ -116,7 +116,7 @@ export function MiniNodeCard({
   const isSender = role === 'sender';
   return (
     <div
-      className="node-drag-handle ndi-card-enter ndi-mini-card"
+      className={`node-drag-handle ndi-card-enter ndi-mini-card ndi-card--${isSender ? 'sender' : 'receiver'}`}
       title={title}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -124,8 +124,9 @@ export function MiniNodeCard({
       }}
       style={{
         '--mini-accent': scheme.accent,
-        borderColor: scheme.border,
-        background: `linear-gradient(90deg, ${scheme.from}, ${scheme.to})`,
+        borderColor: hexToRgba(scheme.border, 0.75),
+        background: `linear-gradient(90deg, ${hexToRgba(scheme.from, 0.85)}, ${hexToRgba(scheme.to, 0.6)}), rgba(8, 12, 22, 0.6)`,
+        boxShadow: `0 10px 22px -12px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 18px -8px ${hexToRgba(scheme.border, 0.6)}`,
       }}
     >
       {!isSender && (

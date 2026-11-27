@@ -1,10 +1,16 @@
 # NDI Manager - Installer Build Instructions
 
-## Version 3.2
+## Version 3.3
 
 ## Overview
 
 This document describes how to build and package the standalone desktop/tray version of NDI Manager using Inno Setup.
+
+## Key Release Notes (v3.3)
+
+- **NDI SDK 6.4** runtime; UTF-8 names; discovery loop and shutdown hardened; file logs in `%LocalAppData%\NDIManager\logs`
+- **Web UI**: live signal particles on routes, control-room tally, arriving/leaving devices, glass cards, `HOST (Stream)` titles, one-line minimized cards, NDI favicon
+- Publish script cleans `publish\wwwroot` so old UI bundles are not packaged
 
 ## Key Release Notes (v3.2)
 
@@ -22,7 +28,7 @@ This document describes how to build and package the standalone desktop/tray ver
 - **Self-contained** `.NET 9` publish for `win-x64` — **no separate .NET install** on target machines
 - Tray menu in English; disconnect balloon notifications removed
 - **Installer license aligned with NDI GPIO Panel:** MIT License + NDI SDK installer notice (`LICENSE`, `INSTALLER-NOTICE.txt`); notice text uses ASCII + CRLF for correct display in the wizard
-- Installer output: `Output\NDIManager-v3.2-Setup.exe`
+- Installer output: `Output\NDIManager-v3.3-Setup.exe`
 - Unified icon branding with `MAN_icon.ico` for installer, application, and tray
 
 ## Prerequisites
@@ -80,7 +86,7 @@ Verify `publish\NDIManager.runtimeconfig.json` contains `"includedFrameworks"` (
 
 Result:
 
-- `Output\NDIManager-v3.2-Setup.exe`
+- `Output\NDIManager-v3.3-Setup.exe`
 
 ## Installer Behavior
 

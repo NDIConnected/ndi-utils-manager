@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [Version 3.3] - 2026-11-27
+
 ### NDI SDK
 
 - Built and tested against **NDI SDK 6.4.0** (runtime `6.4.0.2`); runtime version now logged at startup and exposed as `ndiSdkVersion` in `/api/ndi/status`.
@@ -12,6 +14,7 @@
 
 ### Reliability
 
+- `scripts/publish-standalone.ps1` cleans `publish\wwwroot` before publishing (old UI bundles were packaged in the installer) and stops when the Web UI build fails.
 - Discovery runs in a single non-overlapping loop inside the hosted service (was a `System.Threading.Timer` that could overlap itself); all native NDI calls are serialized, and shutdown waits for the loop before NDI handles are destroyed — fixes possible crashes on Exit / Restart service / port change.
 - Restart waits for the previous web host to fully stop instead of a fixed 500 ms delay.
 - Content root anchored to the executable folder: the Web UI no longer returns 404 when the app is started from a different working directory.
@@ -26,11 +29,16 @@
 
 ### Web UI
 
+- **Live signal on routes**: light particles travel along each confirmed route, more and faster with the real throughput (from the senders' byte counters; format-based estimate when there are none). Cyan = video, green = audio (a video route carrying audio adds a green particle); a route whose sender stopped sending goes dim. Pending routes stay dashed yellow. Particles respect "reduce motion".
+- **Control-room tally**: cards on program get a breathing red frame and glow, cards on preview a green one (also in the minimap).
+- **Devices arriving / leaving**: a newly discovered device pops in with a short highlight; a device that leaves the network turns grey with an `OFFLINE` badge and fades out over 4 s instead of vanishing.
+- **NDI favicon** for the Web UI (browser tab, bookmarks, home-screen icon).
+- **Visual refresh**: glass-style cards with a role accent (sender cyan, receiver amber), deep navy canvas with a soft light following the pointer, dark controls/minimap, monospaced numbers (system fonts only, works offline).
 - Sender and receiver card titles use NDI naming, **`HOST (Stream)`** (e.g. `ISE-DEMO (Mic)`, `LENOVO-02 (NDI-Studio-Monitor)`), so the machine publishing the endpoints is always visible; just the stream name when the host is unknown. Bridge hubs keep `NDI Bridge · <host>`.
 - **Minimize cards to one line**: a pill with role (SENDER / RECEIVER), activity dot and `HOST (Stream)`; handles stay so edges remain attached and new routes can be dropped. Toggle per card with the chevron in the header or by double-clicking it (double-click the pill to restore); **Minimize all / Expand all** in the toolbar. Remembered per device (localStorage).
 - Minimizing or expanding re-packs each column like an accordion (same order and columns, no gaps or overlaps); one-line cards stack with a tight 14 px gap.
 - Canvas nodes are no longer deletable: pressing Backspace on a selected device no longer disconnects all of its routes.
-- Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (previous graph is kept only while the backend snapshot is empty).
+- Removed "ghost" edges/nodes: disconnecting the last route or applying a filter with no matches now clears the canvas (the previous graph is kept only while an empty snapshot is not yet confirmed by the backend, e.g. during a restart). When the last device leaves the network (health `idle`) the canvas clears instead of showing stale cards.
 - Optimistic connections are drawn as pending (yellow, dashed) until the receiver confirms, expire after 8 s with a warning, and are cleared on every disconnect / failed reconnect path.
 - Out-of-order snapshots (REST polls vs. pushes) are dropped using `instanceId` / `sequence`; edges no longer flicker after a connect.
 - SignalR reconnects forever with capped backoff (was giving up after ~17 s), retries a failed initial start, and resyncs with a full fetch after reconnecting.

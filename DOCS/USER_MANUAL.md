@@ -1,6 +1,6 @@
 # NDI Manager — User Manual
 
-**Version 3.2** · June 2026
+**Version 3.3** · November 2026
 
 NDI Manager is a Windows desktop application that discovers NDI senders and receivers on your network, shows them on a visual canvas, and lets you connect receiver inputs to sender outputs through the NDI Discovery Server.
 

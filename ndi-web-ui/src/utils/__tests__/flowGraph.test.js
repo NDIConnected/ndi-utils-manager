@@ -46,7 +46,7 @@ describe('buildFlowGraph', () => {
     expect(nodes.every((n) => n.deletable === false)).toBe(true);
   });
 
-  it('draws confirmed edges green/animated and optimistic ones as pending', () => {
+  it('gives confirmed edges a flowing signal and optimistic ones a pending look', () => {
     const snapshot = basicSnapshot();
     const optimistic = connection('cam', 'cam-out2', 'mon', 'mon-in1', {
       connectionId: 'opt', receiverUuid: 'uuid-other', optimistic: true,
@@ -55,9 +55,28 @@ describe('buildFlowGraph', () => {
     const confirmed = edges.find((e) => e.id === 'edge-uuid-cam-out1->uuid-mon-in1');
     const pending = edges.find((e) => e.id === 'edge-opt');
     expect(confirmed.data.confirmed).toBe(true);
-    expect(confirmed.animated).toBe(true);
+    expect(confirmed.data.activity.level).toBeGreaterThan(0);
     expect(pending.data.confirmed).toBe(false);
-    expect(pending.animated).toBe(false);
+    expect(pending.data.activity).toMatchObject({ kind: 'pending', level: 0 });
+    expect(edges.every((e) => e.animated === false)).toBe(true); // particles replace React Flow's dash animation
+  });
+
+  it('colours the edge by media kind and speeds it up with the measured throughput', () => {
+    const snapshot = basicSnapshot();
+    snapshot.senders[0].channels[0] = { ...snapshot.senders[0].channels[0], width: 1920, height: 1080, audioChannels: 2 };
+    const slow = graphFor(snapshot, { channelRates: new Map([['cam-out1', { rate: 20_000 }]]) }).edges[0];
+    const fast = graphFor(snapshot, { channelRates: new Map([['cam-out1', { rate: 20_000_000 }]]) }).edges[0];
+    expect(slow.data.activity).toMatchObject({ kind: 'video', withAudio: true, level: 1 });
+    expect(fast.data.activity.level).toBe(4);
+    expect(fast.markerEnd.color).toBe(fast.data.activity.color);
+  });
+
+  it('adds tally classes to the node wrapper', () => {
+    const snapshot = basicSnapshot();
+    snapshot.senders[0].channels[0].tallyOnProgram = true;
+    const { nodes } = graphFor(snapshot);
+    expect(nodes[0].className).toContain('ndi-tally-pgm');
+    expect(nodes[1].className).not.toContain('ndi-tally');
   });
 
   it('hides edges whose sender or receiver is filtered out, and suppressed receivers', () => {
@@ -223,6 +242,14 @@ describe('mergeNodes / mergeEdges / refreshNodes', () => {
     const prevEdges = [{ id: 'e', data, selected: true }];
     expect(mergeEdges(prevEdges, [{ id: 'e', data }], false)[0]).toBe(prevEdges[0]);
     expect(mergeEdges(prevEdges, [{ id: 'e', data: {} }], false)[0].selected).toBe(true);
+  });
+
+  it('propagates className changes (tally on/off) even when data is the same object', () => {
+    const data = {};
+    const prev = [{ ...node('a', data), className: 'ndi-node' }];
+    const next = [{ ...node('a', data), className: 'ndi-node ndi-tally-pgm' }];
+    expect(mergeNodes(prev, next, new Set(), false)[0].className).toBe('ndi-node ndi-tally-pgm');
+    expect(refreshNodes(prev, next, new Set(), () => ({ x: 0, y: 0 }))[0].className).toBe('ndi-node ndi-tally-pgm');
   });
 
   it('refreshNodes updates data/position in place and keeps untouched nodes', () => {

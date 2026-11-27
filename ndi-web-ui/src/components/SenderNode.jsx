@@ -14,6 +14,7 @@ import {
   nodeDragHandleProps,
   resolveMachineName,
   formatCardTitle,
+  glassSurface,
 } from './compactNodeHelpers';
 
 const tallyChip = {
@@ -103,12 +104,9 @@ const styles = {
   node: (colorScheme) => ({
     position: 'relative',
     overflow: 'visible',
-    padding: '12px 16px',
-    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
-    borderRadius: '8px',
-    border: `2px solid ${colorScheme.border}`,
+    padding: '14px 16px 12px',
     minWidth: '280px',
-    background: `linear-gradient(to bottom right, ${colorScheme.gradient[0]}, ${colorScheme.gradient[1]})`,
+    ...glassSurface({ border: colorScheme.border, from: colorScheme.gradient[0], to: colorScheme.gradient[1] }),
   }),
   header: {
     fontWeight: 'bold',
@@ -172,10 +170,10 @@ const styles = {
     color: '#9ca3af',
   },
   value: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
   },
   codecValue: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     fontWeight: '600',
     color: '#93c5fd',
   },
@@ -195,7 +193,7 @@ const styles = {
   channelRowLabel: {
     color: '#d1d5db',
     fontSize: '11px',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     lineHeight: 1,
     whiteSpace: 'nowrap',
     marginRight: '12px',
@@ -326,11 +324,11 @@ function SenderNode({ data }) {
         handleSide: 'right',
       });
       return (
-        <div key="compact" className="ndi-card-enter" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+        <div key="compact" className="ndi-card-enter ndi-card ndi-card--sender" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
           <div {...nodeDragHandleProps(compactHeaderStyle())} onDoubleClick={data?.onToggleMinimized}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
               <div style={styles.indicator(deviceScheme, !isLegacy && streamingChannels.length > 0)} />
-              <span>SENDER DEVICE</span>
+              <span className="ndi-role-label">SENDER DEVICE</span>
               {isBridgeHub ? <span style={{ fontSize: 9, color: '#fed7aa' }}>BRIDGE</span> : null}
               {isLegacy ? <span style={{ fontSize: 9, color: '#fcd34d' }}>LEGACY</span> : null}
               {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
@@ -364,11 +362,11 @@ function SenderNode({ data }) {
     }
 
     return (
-      <div key="detailed" className="ndi-card-enter" style={styles.node(deviceScheme)}>
+      <div key="detailed" className="ndi-card-enter ndi-card ndi-card--sender" style={styles.node(deviceScheme)}>
         <div {...nodeDragHandleProps(styles.header)} onDoubleClick={data?.onToggleMinimized}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(deviceScheme, !isLegacy)} />
-            <span>SENDER DEVICE</span>
+            <span className="ndi-role-label">SENDER DEVICE</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={styles.badge(deviceScheme)}>

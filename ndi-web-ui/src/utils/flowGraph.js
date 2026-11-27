@@ -1,10 +1,9 @@
 import { COLLAPSE_CHANNELS_THRESHOLD, MAX_VISIBLE_HANDLES_WHEN_COLLAPSED } from './deviceGrouping';
 import { isConnectionConfirmed } from './flowFilters';
+import { deviceNodeClassName, edgeActivity } from './liveActivity';
 
 // Same value as MarkerType.ArrowClosed in @xyflow/react (kept literal so this module stays framework-free).
 const MARKER_ARROW_CLOSED = 'arrowclosed';
-const EDGE_COLOR_CONFIRMED = '#4ade80';
-const EDGE_COLOR_PENDING = '#facc15';
 
 export const senderNodeId = (deviceKey) => `sender-device-${deviceKey}`;
 export const receiverNodeId = (deviceKey) => `receiver-device-${deviceKey}`;
@@ -38,7 +37,7 @@ export function mergeNodes(prevNodes, nextNodes, draggingNodeIds, holdPrevious) 
     if (!prev) return { ...node, selected: false };
     const keepDragPosition = prev.position && draggingNodeIds.has(node.id);
     const position = keepDragPosition ? prev.position : node.position;
-    if (prev.data === node.data && samePosition(prev.position, position)) return prev;
+    if (prev.data === node.data && prev.className === node.className && samePosition(prev.position, position)) return prev;
     return { ...prev, ...node, position, selected: prev.selected ?? false };
   });
 }
@@ -65,8 +64,8 @@ export function refreshNodes(prevNodes, nextNodes, draggingNodeIds, resolvePosit
     if (!fresh) return node;
     const keepDragPosition = node.position && draggingNodeIds.has(node.id);
     const position = keepDragPosition ? node.position : resolvePosition(node.id);
-    if (node.data === fresh.data && samePosition(node.position, position)) return node;
-    return { ...node, data: fresh.data, position };
+    if (node.data === fresh.data && node.className === fresh.className && samePosition(node.position, position)) return node;
+    return { ...node, data: fresh.data, className: fresh.className, position };
   });
 }
 
@@ -141,6 +140,7 @@ export function buildFlowGraph({
   expandedDeviceKeys = new Set(),
   compactDeviceKeys = new Set(),
   minimizedDeviceKeys = new Set(),
+  channelRates = new Map(),
   resolvePosition,
   nodeDataCache = new Map(),
   edgeCache = new Map(),
@@ -211,6 +211,7 @@ export function buildFlowGraph({
       id,
       type: role === 'sender' ? 'senderNode' : 'receiverNode',
       dragHandle: '.node-drag-handle',
+      className: deviceNodeClassName(device, role),
       deletable: false,
       position: resolvePosition(id),
       data: buildNodeData(device, role),
@@ -239,11 +240,16 @@ export function buildFlowGraph({
     const ordered = [...connections].sort((a, b) => channelOrder(a.senderChannelId) - channelOrder(b.senderChannelId));
     ordered.forEach((conn, laneIndex) => {
       const confirmed = isConnectionConfirmed(conn, snapshot);
-      const color = confirmed ? EDGE_COLOR_CONFIRMED : EDGE_COLOR_PENDING;
+      const senderChannel = senderByDeviceKey.get(conn.senderDeviceKey)?.channels
+        ?.find((c) => c.channelId === conn.senderChannelId);
+      const receiverChannel = receiverByDeviceKey.get(conn.receiverDeviceKey)?.channels
+        ?.find((c) => c.channelId === conn.receiverChannelId);
+      const activity = edgeActivity(senderChannel, channelRates.get(conn.senderChannelId), confirmed, receiverChannel);
+      const { color } = activity;
       const sourceNodeId = senderNodeId(conn.senderDeviceKey);
       const targetNodeId = receiverNodeId(conn.receiverDeviceKey);
       const edgeId = `edge-${conn.connectionId}`;
-      const edgeKey = JSON.stringify([conn, laneIndex, ordered.length, confirmed]);
+      const edgeKey = JSON.stringify([conn, laneIndex, ordered.length, confirmed, activity]);
       liveEdgeIds.add(edgeId);
 
       const cached = edgeCache.get(edgeId);
@@ -259,7 +265,8 @@ export function buildFlowGraph({
         target: targetNodeId,
         sourceHandle: `out-${conn.senderChannelId}`,
         targetHandle: `in-${conn.receiverChannelId}`,
-        animated: confirmed,
+        // Flow is drawn by CustomEdge (particles), not React Flow's dashed animation.
+        animated: false,
         deletable: true,
         selectable: true,
         reconnectable: true,
@@ -273,6 +280,7 @@ export function buildFlowGraph({
           edgeLaneIndex: laneIndex,
           edgeLaneCount: ordered.length,
           confirmed,
+          activity,
           sourceNodeId,
           targetNodeId,
           onFocus: createEdgeFocus(sourceNodeId, targetNodeId),

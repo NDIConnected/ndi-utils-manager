@@ -6,7 +6,7 @@
 
 Windows (.NET 9) app that runs in the **system tray**, hosts an **ASP.NET Core** API, and ships a **Web UI** for NDI discovery and connection management (send/receive, visual flow with React Flow).
 
-**Version:** 3.2  
+**Version:** 3.3  
 **Platform:** Windows 10/11 x64  
 **.NET:** 9.0 (self-contained installer)  
 **Status:** Sample / R&D release  
@@ -22,7 +22,7 @@ The published installer bundles the .NET runtime. End users do **not** need to i
 
 ## Quick start (installed app)
 
-1. Run **`NDIManager-v3.2-Setup.exe`** from `Output\` (after building the installer) or your release package.  
+1. Run **`NDIManager-v3.3-Setup.exe`** from `Output\` (after building the installer) or your release package.  
 2. Use the **system tray** icon → **Open Web UI** (default `http://localhost:5000`).  
 3. Drag connections on the **Canvas** tab; use **Table** for a receiver list.
 
@@ -61,6 +61,16 @@ dotnet publish -c Release -r win-x64 --self-contained true -o .\publish
 ```
 
 Details: [INSTALLER_README.md](INSTALLER_README.md).
+
+## What's new in 3.3 (summary)
+
+- **Live signal on routes** — particles flow along each route, faster with the real throughput; cyan = video, green = audio.
+- **Control-room tally** — red (program) / green (preview) breathing frame around cards.
+- **Devices arriving / leaving** — new devices pop in; departed ones fade out with an `OFFLINE` badge. The canvas now clears when the last device leaves the network.
+- **Visual refresh** — glass cards with role accents, navy canvas with pointer light, NDI favicon, card titles as `HOST (Stream)`, one-line minimized cards.
+- **Reliability** — NDI SDK 6.4, UTF-8 names, serialized discovery loop, ordered snapshots, file logging, `stalled` health state.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## What's new in 3.2 (summary)
 

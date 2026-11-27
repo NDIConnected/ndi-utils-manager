@@ -12,6 +12,32 @@ export function pickPrimaryCompactChannel(channels, connectedChannelIds = new Se
   );
 }
 
+/** '#rrggbb' → 'rgba(r, g, b, alpha)'; other colour strings are returned unchanged. */
+export function hexToRgba(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/**
+ * Glass card surface: translucent tinted gradient over the dark canvas, hairline border in the state colour,
+ * soft inner highlight and a faint glow. No backdrop-filter (too costly with many nodes while zooming).
+ */
+export function glassSurface({ border, from, to, radius = 12 }) {
+  return {
+    borderRadius: radius,
+    border: `1px solid ${hexToRgba(border, 0.7)}`,
+    background: `linear-gradient(150deg, ${hexToRgba(from, 0.82)} 0%, ${hexToRgba(to, 0.6)} 100%), rgba(8, 12, 22, 0.55)`,
+    boxShadow: [
+      '0 18px 36px -18px rgba(0, 0, 0, 0.85)',
+      'inset 0 1px 0 rgba(255, 255, 255, 0.09)',
+      'inset 0 0 0 1px rgba(255, 255, 255, 0.02)',
+      `0 0 24px -10px ${hexToRgba(border, 0.55)}`,
+    ].join(', '),
+  };
+}
+
 export function compactCardStyle({ border, gradientFrom, gradientTo, minWidth = 200, handleSide = 'right' }) {
   return {
     position: 'relative',
@@ -19,12 +45,9 @@ export function compactCardStyle({ border, gradientFrom, gradientTo, minWidth = 
     padding: '10px 12px',
     paddingRight: handleSide === 'right' ? 18 : 12,
     paddingLeft: handleSide === 'left' ? 18 : 12,
-    boxShadow: '0 8px 12px -4px rgba(0, 0, 0, 0.35)',
-    borderRadius: '8px',
-    border: `2px solid ${border}`,
     minWidth: `${minWidth}px`,
     maxWidth: '240px',
-    background: `linear-gradient(to bottom right, ${gradientFrom}, ${gradientTo})`,
+    ...glassSurface({ border, from: gradientFrom, to: gradientTo, radius: 10 }),
   };
 }
 

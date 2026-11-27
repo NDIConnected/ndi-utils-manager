@@ -14,6 +14,7 @@ import {
   nodeDragHandleProps,
   resolveMachineName,
   formatCardTitle,
+  glassSurface,
 } from './compactNodeHelpers';
 
 const tallyChip = {
@@ -56,14 +57,11 @@ const styles = {
   node: (isConnected) => ({
     position: 'relative',
     overflow: 'visible',
-    padding: '12px 16px',
-    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
-    borderRadius: '8px',
-    border: `2px solid ${isConnected ? '#3b82f6' : '#4b5563'}`,
+    padding: '14px 16px 12px',
     minWidth: '280px',
-    background: isConnected
-      ? 'linear-gradient(to bottom right, #1e3a8a, #1e40af)'
-      : 'linear-gradient(to bottom right, #1f2937, #374151)',
+    ...glassSurface(isConnected
+      ? { border: '#3b82f6', from: '#1e3a8a', to: '#1e40af' }
+      : { border: '#4b5563', from: '#1f2937', to: '#374151' }),
   }),
   header: {
     fontWeight: 'bold',
@@ -127,10 +125,10 @@ const styles = {
     color: '#9ca3af',
   },
   value: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
   },
   codecValue: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     fontWeight: '600',
     color: '#93c5fd',
   },
@@ -145,7 +143,7 @@ const styles = {
     fontSize: '12px',
   },
   connectedSource: {
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     color: '#6ee7b7',
     fontWeight: '600',
     fontSize: '12px',
@@ -174,7 +172,7 @@ const styles = {
   channelRowLabel: {
     color: '#d1d5db',
     fontSize: '11px',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     lineHeight: 1,
     whiteSpace: 'nowrap',
     marginLeft: '12px',
@@ -184,7 +182,7 @@ const styles = {
     minWidth: 0,
     color: '#6ee7b7',
     fontSize: '10px',
-    fontFamily: 'monospace',
+    fontFamily: 'var(--ndi-mono)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -298,7 +296,7 @@ function ReceiverNode({ data }) {
         handleSide: 'left',
       });
       return (
-        <div key="compact" className="ndi-card-enter" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
+        <div key="compact" className="ndi-card-enter ndi-card ndi-card--receiver" style={cardStyle} title={hasWarning ? 'Channel warning' : undefined}>
           <CompactStackedHandles
             channels={channels}
             prefix="in"
@@ -311,7 +309,7 @@ function ReceiverNode({ data }) {
           <div {...nodeDragHandleProps(compactHeaderStyle())} onDoubleClick={data?.onToggleMinimized}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
               <div style={styles.indicator(hasActivity)} />
-              <span>RECEIVER DEVICE</span>
+              <span className="ndi-role-label">RECEIVER DEVICE</span>
               {hasWarning ? <span style={{ fontSize: 10 }}>⚠️</span> : null}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -329,11 +327,11 @@ function ReceiverNode({ data }) {
     }
 
     return (
-      <div key="detailed" className="ndi-card-enter" style={styles.node(hasActivity)}>
+      <div key="detailed" className="ndi-card-enter ndi-card ndi-card--receiver" style={styles.node(hasActivity)}>
         <div {...nodeDragHandleProps(styles.header)} onDoubleClick={data?.onToggleMinimized}>
           <div style={styles.headerLeft}>
             <div style={styles.indicator(hasActivity)} />
-            <span>RECEIVER DEVICE</span>
+            <span className="ndi-role-label">RECEIVER DEVICE</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={styles.badge(hasActivity)}>

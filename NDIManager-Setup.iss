@@ -1,8 +1,8 @@
 ; NDI Manager Installer Script for Inno Setup
-; Version 3.2 - Standalone Application (System Tray)
+; Version 3.3 - Standalone Application (System Tray)
 
 #define MyAppName "NDI Manager"
-#define MyAppVersion "3.2"
+#define MyAppVersion "3.3"
 #define MyAppPublisher "Vizrt NDI AB"
 #define MyAppExeName "NDIManager.exe"
 #define MyLicenseFile "LICENSE"
