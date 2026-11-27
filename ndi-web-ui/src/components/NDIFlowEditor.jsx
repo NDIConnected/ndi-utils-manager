@@ -31,9 +31,12 @@ import {
   confirmedOptimisticReceivers,
   mergeNodes,
   mergeEdges,
+  receiverNodeId,
   refreshNodes,
+  senderNodeId,
   shouldHoldPreviousGraph,
 } from '../utils/flowGraph';
+import { nextExpiry, updateArrivals, updateChannelRates, updateDepartures } from '../utils/liveActivity';
 
 const LINK_LABELS = {
   live: 'Live',
@@ -113,6 +116,18 @@ export default function NDIFlowEditor() {
   const nodeDataCacheRef = useRef(new Map());
   const edgeCacheRef = useRef(new Map());
   const visibleConnectionsRef = useRef([]);
+  // Live activity: per-channel throughput, devices fading out after leaving, newly arrived devices.
+  const channelRatesRef = useRef(new Map());
+  const ratesSnapshotRef = useRef(null);
+  const liveNodesRef = useRef([]);
+  const snapshotNodeIdsRef = useRef(null);
+  const departingRef = useRef(new Map());
+  const arrivingRef = useRef(new Map());
+  const expiryTimerRef = useRef(null);
+  const [liveTick, setLiveTick] = useState(0);
+  useEffect(() => () => {
+    if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
+  }, []);
 
   const singleHostKey = selectedHostKeys.size === 1 ? [...selectedHostKeys][0] : null;
 
@@ -265,6 +280,20 @@ export default function NDIFlowEditor() {
 
   const backendHealth = systemStatus?.health ?? null;
 
+  // Soft light following the pointer on the canvas (CSS variables, one update per frame).
+  const pointerFrameRef = useRef(0);
+  const trackPointerLight = useCallback((event) => {
+    const pane = event.currentTarget;
+    const { clientX, clientY } = event;
+    if (pointerFrameRef.current) return;
+    pointerFrameRef.current = requestAnimationFrame(() => {
+      pointerFrameRef.current = 0;
+      const rect = pane.getBoundingClientRect();
+      pane.style.setProperty('--mx', `${clientX - rect.left}px`);
+      pane.style.setProperty('--my', `${clientY - rect.top}px`);
+    });
+  }, []);
+
   // ---- snapshot / view state → React Flow nodes and edges
   useEffect(() => {
     const viewFilters = { senderFilter, receiverFilter, selectedHostKeys, showActiveOnly };
@@ -274,8 +303,14 @@ export default function NDIFlowEditor() {
 
     const stackedLayout = computeDefaultLayout(snapshot.senders, snapshot.receivers, expandedDeviceKeys, layoutViewModes);
     const positionOf = (nodeId) => resolvePosition(nodeId, stackedLayout);
+    const now = Date.now();
 
-    const { nodes: nextNodes, edges: nextEdges, visibleConnections } = buildFlowGraph({
+    if (ratesSnapshotRef.current !== snapshot) {
+      ratesSnapshotRef.current = snapshot;
+      channelRatesRef.current = updateChannelRates(channelRatesRef.current, snapshot.senders, now);
+    }
+
+    const { nodes: builtNodes, edges: nextEdges, visibleConnections } = buildFlowGraph({
       snapshot,
       filteredSenders,
       filteredReceivers,
@@ -284,6 +319,7 @@ export default function NDIFlowEditor() {
       expandedDeviceKeys,
       compactDeviceKeys,
       minimizedDeviceKeys,
+      channelRates: channelRatesRef.current,
       resolvePosition: positionOf,
       nodeDataCache: nodeDataCacheRef.current,
       edgeCache: edgeCacheRef.current,
@@ -295,6 +331,46 @@ export default function NDIFlowEditor() {
     // Hold the last graph only while an empty snapshot is unconfirmed (backend restarting); once the
     // network is confirmed empty (last device gone), clear the canvas instead of showing stale cards.
     const holdPreviousGraph = shouldHoldPreviousGraph(snapshot, backendHealth);
+
+    // Devices that left the network fade out for a few seconds; new ones get a short highlight.
+    let nextNodes = builtNodes;
+    let ghostKey = '';
+    if (!holdPreviousGraph) {
+      const snapshotIds = new Set([
+        ...snapshot.senders.map((d) => senderNodeId(d.deviceKey)),
+        ...snapshot.receivers.map((d) => receiverNodeId(d.deviceKey)),
+      ]);
+      const builtIds = new Set(builtNodes.map((n) => n.id));
+      departingRef.current = updateDepartures({
+        departing: departingRef.current,
+        previousNodes: liveNodesRef.current,
+        nextNodeIds: builtIds,
+        stillPresent: (id) => snapshotIds.has(id),
+        now,
+      });
+      arrivingRef.current = updateArrivals({
+        arriving: arrivingRef.current,
+        previousNodeIds: snapshotNodeIdsRef.current || new Set(),
+        nextNodeIds: snapshotIds,
+        isFirstBuild: snapshotNodeIdsRef.current === null || snapshotNodeIdsRef.current.size === 0,
+        now,
+      });
+      liveNodesRef.current = builtNodes;
+      snapshotNodeIdsRef.current = snapshotIds;
+
+      const arriving = arrivingRef.current;
+      nextNodes = builtNodes.map((n) => (arriving.has(n.id) ? { ...n, className: `${n.className} ndi-node-arriving` } : n));
+      const ghosts = [...departingRef.current.values()].map((e) => e.node);
+      nextNodes = [...nextNodes, ...ghosts];
+      ghostKey = `::ghosts:${ghosts.map((n) => n.id).join(',')}`;
+
+      if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current);
+      const expiry = nextExpiry(departingRef.current, arriving);
+      expiryTimerRef.current = expiry === null
+        ? null
+        : setTimeout(() => setLiveTick((t) => t + 1), Math.max(expiry - now, 0) + 30);
+    }
+
     const structureKey = holdPreviousGraph ? 'held-while-unconfirmed' : buildCanvasStructureKey({
       filteredSenders,
       filteredReceivers,
@@ -303,7 +379,7 @@ export default function NDIFlowEditor() {
       compactDeviceKeys,
       minimizedDeviceKeys,
       ...viewFilters,
-    });
+    }) + ghostKey;
     const structureChanged = structureKey !== canvasStructureKeyRef.current;
     canvasStructureKeyRef.current = structureKey;
 
@@ -316,6 +392,7 @@ export default function NDIFlowEditor() {
   }, [
     snapshot,
     backendHealth,
+    liveTick,
     senderFilter,
     receiverFilter,
     selectedHostKeys,
@@ -495,7 +572,7 @@ export default function NDIFlowEditor() {
         )}
 
         {mainTab === 'canvas' ? (
-          <div style={styles.flowPane}>
+          <div className="ndi-flow-pane" style={styles.flowPane} onPointerMove={trackPointerLight}>
             {showLegend ? <MetricsLegend onClose={dismissLegend} /> : null}
             <ReactFlowProvider>
               <AutoMeasureLayout
@@ -529,12 +606,16 @@ export default function NDIFlowEditor() {
                 maxZoom={1.5}
                 attributionPosition="bottom-right"
               >
-                <Background color="#374151" gap={16} />
+                <Background color="rgba(148, 163, 184, 0.16)" gap={22} size={1.2} />
                 <Controls />
                 <MiniMap
+                  pannable
+                  maskColor="rgba(2, 6, 23, 0.7)"
+                  nodeBorderRadius={6}
                   nodeColor={(node) => {
-                    if (node.type === 'senderNode') return '#10b981';
-                    if (node.type === 'receiverNode') return '#3b82f6';
+                    if (node.className?.includes('ndi-tally-pgm')) return '#ef4444';
+                    if (node.type === 'senderNode') return '#67e8f9';
+                    if (node.type === 'receiverNode') return '#fbbf24';
                     return '#6b7280';
                   }}
                 />
@@ -571,7 +652,7 @@ export default function NDIFlowEditor() {
 
       <div style={styles.footer}>
         <span>
-          v{systemStatus?.appVersion || '3.2.0'}
+          v{systemStatus?.appVersion || '3.3.0'}
           {systemStatus?.lastDiscoveryAt
             ? ` · updated ${new Date(systemStatus.lastDiscoveryAt).toLocaleTimeString('en-US')}`
             : ''}

@@ -14,14 +14,24 @@ body,
   overflow: hidden;
 }
 
+:root {
+  /* System fonts only: the app often runs on offline control-room networks. */
+  --ndi-sans: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Inter', 'Roboto', 'Helvetica Neue', sans-serif;
+  --ndi-mono: 'Cascadia Mono', 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Consolas, ui-monospace, monospace;
+  --ndi-bg: #070b14;
+  --ndi-accent-sender: #67e8f9;
+  --ndi-accent-receiver: #fbbf24;
+  --ndi-tally-pgm: #ef4444;
+  --ndi-tally-pvw: #22c55e;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--ndi-sans);
+  font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #1a1a1a;
+  background-color: var(--ndi-bg);
   color: #ffffff;
 }
 
@@ -121,7 +131,7 @@ body {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--mini-accent);
+  color: var(--role-accent, var(--mini-accent));
   flex-shrink: 0;
 }
 
@@ -144,4 +154,174 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- Canvas backdrop: deep navy with a soft light that follows the pointer --------------- */
+.ndi-flow-pane {
+  --mx: 50%;
+  --my: 40%;
+  background:
+    radial-gradient(520px circle at var(--mx) var(--my), rgba(34, 211, 238, 0.075), transparent 65%),
+    radial-gradient(1200px circle at 15% -10%, rgba(59, 130, 246, 0.10), transparent 60%),
+    radial-gradient(900px circle at 110% 110%, rgba(251, 191, 36, 0.05), transparent 60%),
+    var(--ndi-bg);
+}
+
+.ndi-flow-pane .react-flow {
+  background: transparent;
+}
+
+.ndi-flow-pane .react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+}
+
+.ndi-flow-pane .react-flow__controls-button {
+  background: rgba(15, 23, 42, 0.92);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  fill: #cbd5e1;
+  color: #cbd5e1;
+}
+
+.ndi-flow-pane .react-flow__controls-button:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.ndi-flow-pane .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.ndi-flow-pane .react-flow__minimap {
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+/* ---- Cards: role accent line on top --------------------------------------------------------- */
+.ndi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, var(--role-accent), transparent);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.ndi-card--sender { --role-accent: var(--ndi-accent-sender); }
+.ndi-card--receiver { --role-accent: var(--ndi-accent-receiver); }
+
+.ndi-role-label {
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--role-accent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--role-accent) 45%, transparent);
+}
+
+/* ---- Tally: control-room frame and glow around the whole card --------------------------------
+   Drawn by a pseudo-element animating only opacity: filters on the node would blur its text. */
+.react-flow__node.ndi-tally-pgm::before,
+.react-flow__node.ndi-tally-pvw::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 15px;
+  border: 2px solid var(--tally-color);
+  box-shadow: 0 0 18px 2px var(--tally-color), inset 0 0 10px -2px var(--tally-color);
+  pointer-events: none;
+  animation: ndiTallyBreath var(--tally-speed) ease-in-out infinite;
+}
+
+.react-flow__node.ndi-tally-pgm:has(.ndi-mini-card)::before,
+.react-flow__node.ndi-tally-pvw:has(.ndi-mini-card)::before {
+  border-radius: 999px;
+}
+
+.react-flow__node.ndi-tally-pgm { --tally-color: rgba(239, 68, 68, 0.95); --tally-speed: 1.6s; }
+.react-flow__node.ndi-tally-pvw { --tally-color: rgba(34, 197, 94, 0.85); --tally-speed: 2.4s; }
+
+@keyframes ndiTallyBreath {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* ---- Devices arriving / leaving the network --------------------------------------------------- */
+@keyframes ndiNodeArrive {
+  0% { opacity: 0; transform: scale(0.86); box-shadow: 0 0 0 0 rgba(103, 232, 249, 0.0); }
+  35% { opacity: 1; transform: scale(1.02); box-shadow: 0 0 0 6px rgba(103, 232, 249, 0.35); }
+  100% { transform: none; box-shadow: 0 0 0 14px rgba(103, 232, 249, 0); }
+}
+
+.react-flow__node.ndi-node-arriving > div {
+  animation: ndiNodeArrive 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ndiNodeLeave {
+  0% { opacity: 1; }
+  25% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+.react-flow__node.ndi-node-leaving::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: grayscale(1);
+  z-index: 5;
+  pointer-events: none;
+}
+
+.react-flow__node.ndi-node-leaving {
+  animation: ndiNodeLeave 4s ease-in forwards;
+  pointer-events: none;
+}
+
+.react-flow__node.ndi-node-leaving > div {
+  outline: 1px dashed rgba(248, 113, 113, 0.7);
+  outline-offset: 3px;
+}
+
+.react-flow__node.ndi-node-leaving::after {
+  content: 'OFFLINE';
+  position: absolute;
+  top: -10px;
+  right: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #fee2e2;
+  background: #b91c1c;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+  z-index: 6;
+}
+
+/* ---- Routes: light particles carrying the signal --------------------------------------------- */
+.ndi-edge-particle {
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+@keyframes ndiEdgeIgnite {
+  0% { stroke-opacity: 0.9; stroke-width: 14px; }
+  100% { stroke-opacity: 0.16; stroke-width: 7px; }
+}
+
+.ndi-edge-glow {
+  animation: ndiEdgeIgnite 0.9s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ndi-edge-particles { display: none; }
+  .react-flow__node.ndi-tally-pgm::before,
+  .react-flow__node.ndi-tally-pvw::before,
+  .react-flow__node.ndi-node-arriving > div,
+  .ndi-edge-glow { animation: none; }
 }

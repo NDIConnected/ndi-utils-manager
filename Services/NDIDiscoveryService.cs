@@ -344,7 +344,7 @@ public class NDIDiscoveryService : BackgroundService
 
     private NdiSystemStatus BuildSystemStatus(NDIAggregatedSnapshot snapshot)
     {
-        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.1.0";
+        var version = typeof(NDIDiscoveryService).Assembly.GetName().Version?.ToString(3) ?? "3.3.0";
         var sendConnected = _sendListenerConnected;
         var recvConnected = _recvListenerConnected;
         var health = "ok";
